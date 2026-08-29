@@ -1,0 +1,9 @@
+node_modules
+dist
+.env
+secrets
+*.log
+.git
+.DS_Store
+test
+coverage
