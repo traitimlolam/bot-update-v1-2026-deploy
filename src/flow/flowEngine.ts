@@ -40,6 +40,8 @@ function phoneErrorToMessage(errorType: PhoneErrorType): MessageCode {
       return 'M6_LONG';
     case 'invalidPrefix':
       return 'M6_INVALID';
+    default:
+      throw new Error(`phoneErrorToMessage: unknown errorType "${errorType}"`);
   }
 }
 
