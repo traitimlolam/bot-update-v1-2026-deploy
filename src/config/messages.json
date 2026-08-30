@@ -4,9 +4,10 @@
   "M3": "Anh/chị nhắn em số zalo nhé. Em gửi vị trí, ảnh mặt bằng và bảng giá chi tiết anh/chị tham khảo ạ.",
   "M4": "Tất cả đất bên em bán đều có sổ đỏ, pháp lý rõ ràng, công chứng trong ngày.",
   "M5": "Anh/Chị chờ một chút, nhân viên tư vấn của bên em sẽ liên hệ với anh chị ngay đây ạ.",
-  "M6_SHORT": "Anh/chị kiểm tra giúp em số điện thoại đã chuẩn chưa ạ, em thấy nó thiếu số.",
-  "M6_LONG": "Anh/chị kiểm tra giúp em số điện thoại đã chuẩn chưa ạ, em thấy nó thừa số.",
+  "M6_SHORT": "Anh/chị kiểm tra lại số điện thoại giúp em, nó đang thiếu số ạ.",
+  "M6_LONG": "Anh/chị kiểm tra lại số điện thoại giúp em, nó đang thừa số ạ.",
   "M6_INVALID": "Anh/chị kiểm tra giúp em số điện thoại đã chuẩn chưa ạ, em thấy nó chưa đúng định dạng.",
+  "M7": "Dạ, em đã có số điện thoại của anh/chị và giao đến cho nhân viên phụ trách, anh/chị chờ một chút em báo nhân viên liên hệ lại ngay với anh chị đây ạ.",
   "buttons": [
     { "label": "Ở đâu?", "payload": "BTN_LOCATION" },
     { "label": "Có sổ đỏ không?", "payload": "BTN_LEGAL" },

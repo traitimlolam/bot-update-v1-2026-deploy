@@ -14,6 +14,7 @@ export interface MessagesConfig {
   M6_SHORT: string;
   M6_LONG: string;
   M6_INVALID: string;
+  M7: string;
   buttons: MessageButton[];
 }
 

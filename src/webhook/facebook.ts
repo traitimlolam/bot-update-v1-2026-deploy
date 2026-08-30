@@ -11,7 +11,12 @@ import {
 } from '../flow/flowEngine';
 import { checkPhone } from '../flow/phoneValidator';
 import { getConversation, getDb, logError, saveConversation, withLock } from '../state/firestore';
-import { appendLead, LeadSource } from '../services/sheetsService';
+import {
+  appendLead,
+  copyLeadToFollowUpSheet,
+  LeadSource,
+  updateLeadPhoneAndCopyToFollowUpSheet,
+} from '../services/sheetsService';
 import { withRetry } from '../util/retry';
 
 const GRAPH_API_VERSION = 'v19.0';
@@ -156,25 +161,13 @@ async function loadOrCreateConversation(psid: string): Promise<ConversationRecor
  * và gửi M5 2 lần. Khoá đảm bảo các lượt của cùng 1 khách luôn chạy tuần tự.
  *
  * `getCustomerName` là hàm lazy — chỉ gọi (và chỉ tốn 1 lời gọi Graph API lấy first_name/last_name)
- * khi thật sự chốt được lead, tránh gọi API vô ích ở mọi tin nhắn (kể cả khi khách đã CLOSED và bot
- * sẽ không trả lời gì, hay nhắn tin tự do không chứa số điện thoại).
+ * khi thật sự chốt được lead, tránh gọi API vô ích ở mọi tin nhắn khác.
  */
 export async function runFlowTurn(
   psid: string,
   input: FlowInput,
   getCustomerName: () => Promise<string | null>
 ): Promise<void> {
-  // Fast-path không cần khoá: CLOSED là state cuối, không có luồng nào trong hệ thống chuyển ngược
-  // lại (mục 6) — đọc trước ngoài khoá để tránh chiếm khoá + ghi Firestore vô ích (chỉ để refresh
-  // lastFlowSentAt dù bot không gửi gì) mỗi khi 1 khách đã CLOSED nhắn thêm (AC6). Vẫn an toàn: nếu
-  // đọc này "lỡ" thấy chưa CLOSED do đang có 1 lượt khác chạy song song, lượt hiện tại vẫn xin khoá
-  // và tự đọc lại state MỚI NHẤT bên trong (`loadOrCreateConversation`) trước khi quyết định — không
-  // có đường nào bỏ qua nhánh này lại vô tình ghi đè hay bỏ sót 1 lead.
-  const preCheck = await getConversation(psid);
-  if (preCheck && preCheck.state === 'CLOSED') {
-    return;
-  }
-
   await withLock(`psid:${psid}`, async () => {
     const current = await loadOrCreateConversation(psid);
     const result = processInput(current, input);
@@ -206,6 +199,24 @@ export async function runFlowTurn(
         await logError('appendLead', err, {
           psid,
           phone: result.leadPhone,
+        });
+      }
+    } else if (result.trackFollowUp && current.phone) {
+      // Khách đã CLOSED từ trước nhắn lại, không phải 1 lần gõ sai định dạng số (mục 6, 8c — đã gửi
+      // M7 ở bước trên). Nếu vừa gửi lại số hợp lệ KHÁC số cũ (result.correctedPhone) -> đây là 1
+      // lần SỬA số, phải sửa lại cột B trên tab tháng gốc trước khi copy; ngược lại chỉ copy nguyên
+      // trạng dòng lead cũ. Không tạo lead mới, không đụng cột F/round-robin.
+      try {
+        if (result.correctedPhone) {
+          await updateLeadPhoneAndCopyToFollowUpSheet(current.phone, result.correctedPhone);
+        } else {
+          await copyLeadToFollowUpSheet(current.phone);
+        }
+      } catch (err) {
+        await logError('followUpSheetTracking', err, {
+          psid,
+          phone: current.phone,
+          correctedPhone: result.correctedPhone,
         });
       }
     }
@@ -366,8 +377,29 @@ async function handleFirstCommentWithValidPhone(
 
   const existing = await getConversation(resolvedPsid);
   if (existing && existing.state === 'CLOSED') {
-    // Đã chốt lead từ trước qua kênh khác (vd đã nhắn tin trực tiếp cho số khác) -> không ghi
-    // trùng Sheet (AC6). Gửi thừa 1 tin M5 là rủi ro tồn dư đã biết của Private Reply API (mục 14).
+    // Đã chốt lead từ trước qua kênh khác (vd đã nhắn tin trực tiếp) -> không ghi lead mới (AC6).
+    // Gửi thừa 1 tin M5 thay vì M7 là rủi ro tồn dư đã biết của Private Reply API (mục 14, không
+    // biết trước state trước khi gửi). Vẫn thực hiện đúng việc theo dõi "hỏi lại" như kênh nhắn tin
+    // trực tiếp (mục 6, 8c): số trong comment khác số đã ghi -> sửa lại + copy; giống số cũ -> chỉ
+    // copy nguyên trạng — tránh 2 kênh xử lý lệch nhau (comment vs tin nhắn) cho cùng 1 tình huống.
+    if (existing.phone) {
+      try {
+        if (existing.phone !== phone) {
+          await updateLeadPhoneAndCopyToFollowUpSheet(existing.phone, phone);
+          await saveConversation(resolvedPsid, { ...existing, phone });
+        } else {
+          await copyLeadToFollowUpSheet(existing.phone);
+        }
+      } catch (err) {
+        await logError('followUpSheetTracking', err, {
+          commentId,
+          commenterId,
+          resolvedPsid,
+          oldPhone: existing.phone,
+          newPhone: phone,
+        });
+      }
+    }
     return;
   }
 
@@ -409,7 +441,10 @@ async function handleFirstCommentWithInvalidPhone(
  * PSID sau khi đã gửi Private Reply đầu tiên qua comment_id — không có cách nào đọc trước để biết
  * PSID này đã từng chat trực tiếp (có thể đã IN_PROGRESS hay CLOSED) hay chưa. Chấp nhận gửi tối
  * thiểu 1 tin (M1) trước, rồi mới kiểm tra state thật để quyết định bước tiếp theo:
- * - `CLOSED` (đã có số hợp lệ) -> dừng hẳn, không gửi M2/M3, không đụng state đã lưu (mục 6, AC6).
+ * - `CLOSED` (đã có số hợp lệ) -> không gửi thêm M2/M3, không đổi state, nhưng vẫn theo dõi "hỏi
+ *   lại" như kênh nhắn tin trực tiếp (copy nguyên trạng dòng lead cũ sang tab "Hỏi lại" — mục 6,
+ *   8c) vì comment này không có số mới để sửa. Việc lỡ gửi M1 thay vì M7 là giới hạn kỹ thuật
+ *   không tránh được của Private Reply API (mục 14), không phải lỗi logic.
  * - `NEW`/`IN_PROGRESS`/chưa từng có hội thoại -> tiếp tục gửi đủ M2, M3 để hoàn thành trọn bộ
  *   M1→M2→M3, dù là hỏi lần đầu hay "hỏi lại" khi đang IN_PROGRESS (mục 5.2/6, AC8/AC9) — không
  *   còn dừng giữa chừng ở M1 như hành vi cũ trước khi có quy tắc "hỏi lại".
@@ -437,8 +472,13 @@ async function handleFirstCommentWithoutPhone(commentId: string, commenterId: st
 
   const existing = await getConversation(resolvedPsid);
   if (existing && existing.state === 'CLOSED') {
-    // Đã chốt lead từ trước (qua kênh khác) -> dừng hẳn, không gửi thêm gì (AC6). Việc lỡ gửi M1
-    // ở trên là giới hạn kỹ thuật không tránh được của Private Reply API (mục 14), không phải lỗi logic.
+    if (existing.phone) {
+      try {
+        await copyLeadToFollowUpSheet(existing.phone);
+      } catch (err) {
+        await logError('followUpSheetTracking', err, { commentId, commenterId, resolvedPsid, phone: existing.phone });
+      }
+    }
     return;
   }
 

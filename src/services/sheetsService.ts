@@ -346,3 +346,147 @@ export async function appendLead(lead: LeadInput): Promise<string> {
     return assignedStaff;
   });
 }
+
+/**
+ * Tab theo dõi khách đã CLOSED nhưng nhắn lại hỏi thêm (mục 6 phiên bản mới) — giả định tab này đã
+ * được tạo sẵn thủ công trên Sheet thật với header giống các tab tháng (A-H); bot không tự tạo tab
+ * này nếu chưa có (khác với tab tháng ở mục 8b), chỉ đọc/ghi vào tab đã tồn tại.
+ */
+const FOLLOW_UP_SHEET_NAME = 'Hỏi lại';
+
+interface LeadRowLocation {
+  tabTitle: string;
+  rowNumber: number;
+  values: string[];
+}
+
+/**
+ * Quét cột B (SĐT) của tất cả các tab "Tháng {N}" hiện có (không tính tab "Hỏi lại") để tìm dòng
+ * lead cũ khớp đúng `phone`, trả về tên tab + số dòng + TOÀN BỘ giá trị cột A-H của dòng đó; trả về
+ * `null` nếu không tìm thấy ở bất kỳ tab nào. Dừng ngay khi tìm thấy match đầu tiên (giả định 1 số
+ * điện thoại chỉ xuất hiện ở đúng 1 dòng lead, khớp nguyên tắc "1 lead = 1 dòng" của mục 8).
+ */
+async function findLeadRowLocationByPhone(
+  sheets: sheets_v4.Sheets,
+  spreadsheetId: string,
+  phone: string
+): Promise<LeadRowLocation | null> {
+  const meta = await sheets.spreadsheets.get({ spreadsheetId });
+  const monthTabTitles = (meta.data.sheets ?? [])
+    .map((s) => s.properties?.title)
+    .filter((title): title is string => !!title && /^Tháng \d+$/.test(title));
+
+  for (const tabTitle of monthTabTitles) {
+    const columnBRes = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `'${tabTitle}'!B2:B${MAX_TRACKED_ROWS}`,
+    });
+    const rows = columnBRes.data.values ?? [];
+    const matchIndex = rows.findIndex((row) => row?.[0] === phone);
+    if (matchIndex === -1) continue;
+
+    const rowNumber = matchIndex + 2;
+    const rowRes = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `'${tabTitle}'!A${rowNumber}:H${rowNumber}`,
+    });
+    return { tabTitle, rowNumber, values: rowRes.data.values?.[0] ?? [] };
+  }
+
+  return null;
+}
+
+/**
+ * Ghi `rowValues` (đúng 8 giá trị cột A-H) vào dòng trống tiếp theo của tab "Hỏi lại" (dò dòng trống
+ * theo cột A, tái sử dụng đúng `findNextEmptyRow` — bỏ qua dòng đã có dữ liệu). Dùng chung cho cả
+ * `copyLeadToFollowUpSheet` (copy nguyên trạng) lẫn `updateLeadPhoneAndCopyToFollowUpSheet` (copy
+ * sau khi đã sửa số điện thoại) — tránh cài trùng logic dò-dòng-trống-rồi-ghi ở 2 nơi.
+ *
+ * Khoá theo tên tab "Hỏi lại" (R7): 2 khách CLOSED nhắn lại gần như cùng lúc không được cùng đọc
+ * "dòng trống kế tiếp" của tab "Hỏi lại" rồi ghi đè lên nhau.
+ */
+async function appendRowToFollowUpSheet(
+  sheets: sheets_v4.Sheets,
+  spreadsheetId: string,
+  rowValues: string[]
+): Promise<void> {
+  await withLock(`sheet:${spreadsheetId}:${FOLLOW_UP_SHEET_NAME}`, async () => {
+    const rowNumber = await withRetry(() =>
+      findNextEmptyRow(sheets, spreadsheetId, FOLLOW_UP_SHEET_NAME)
+    );
+    await withRetry(() =>
+      sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range: `'${FOLLOW_UP_SHEET_NAME}'!A${rowNumber}:H${rowNumber}`,
+        valueInputOption: 'RAW',
+        requestBody: { values: [rowValues] },
+      })
+    );
+  });
+}
+
+/**
+ * Khách đã CLOSED nhắn lại hỏi thêm, không sửa số điện thoại (mục 6 phiên bản mới): tìm dòng lead cũ
+ * theo số điện thoại đã ghi, copy TOÀN BỘ giá trị cột A-H NGUYÊN TRẠNG sang tab "Hỏi lại". Không tạo
+ * dòng mới ở tab tháng, không đổi cột F/round-robin — đây chỉ là bản sao để nhân viên biết khách nào
+ * đang hỏi lại, cần ưu tiên liên hệ, KHÔNG phải 1 lead mới.
+ *
+ * Nếu không tìm thấy dòng lead cũ nào khớp số điện thoại (vd `appendLead` từng thất bại và chỉ được
+ * ghi log lỗi chứ chưa lên Sheet — mục 10), hàm throw để lớp gọi ngoài log lỗi, không âm thầm bỏ qua.
+ */
+export async function copyLeadToFollowUpSheet(phone: string): Promise<void> {
+  const spreadsheetId = process.env.GOOGLE_SHEET_ID;
+  if (!spreadsheetId) {
+    throw new Error('GOOGLE_SHEET_ID is not set');
+  }
+
+  const sheets = await getSheetsClient();
+  const location = await withRetry(() => findLeadRowLocationByPhone(sheets, spreadsheetId, phone));
+  if (!location) {
+    throw new Error(
+      `copyLeadToFollowUpSheet: không tìm thấy dòng lead nào khớp số điện thoại ${phone} ở bất kỳ tab tháng nào`
+    );
+  }
+
+  await appendRowToFollowUpSheet(sheets, spreadsheetId, location.values);
+}
+
+/**
+ * Khách đã CLOSED gửi lại số điện thoại HỢP LỆ nhưng KHÁC số đã ghi trước đó (mục 6, 8c): tìm dòng
+ * lead cũ theo `oldPhone`, SỬA lại đúng cột B (SĐT) của dòng đó thành `newPhone` trên tab tháng gốc,
+ * rồi copy dòng ĐÃ SỬA (không phải bản gốc) sang tab "Hỏi lại". Chỉ sửa cột B — tuyệt đối không đụng
+ * các cột còn lại (tên khách, nguồn khách, nhân viên phụ trách... giữ nguyên như lần chốt lead đầu).
+ *
+ * Khoá theo tên tab tháng gốc (R7, giống `appendLead`) khi sửa cột B — tránh đụng độ với 1 lead khác
+ * đang được ghi/đọc trên cùng tab đó cùng lúc; khoá riêng tab "Hỏi lại" khi copy (xem
+ * `appendRowToFollowUpSheet`).
+ */
+export async function updateLeadPhoneAndCopyToFollowUpSheet(oldPhone: string, newPhone: string): Promise<void> {
+  const spreadsheetId = process.env.GOOGLE_SHEET_ID;
+  if (!spreadsheetId) {
+    throw new Error('GOOGLE_SHEET_ID is not set');
+  }
+
+  const sheets = await getSheetsClient();
+  const location = await withRetry(() => findLeadRowLocationByPhone(sheets, spreadsheetId, oldPhone));
+  if (!location) {
+    throw new Error(
+      `updateLeadPhoneAndCopyToFollowUpSheet: không tìm thấy dòng lead nào khớp số điện thoại cũ ${oldPhone} ở bất kỳ tab tháng nào`
+    );
+  }
+
+  await withLock(`sheet:${spreadsheetId}:${location.tabTitle}`, () =>
+    withRetry(() =>
+      sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range: `'${location.tabTitle}'!B${location.rowNumber}`,
+        valueInputOption: 'RAW',
+        requestBody: { values: [[newPhone]] },
+      })
+    )
+  );
+
+  const updatedValues = [...location.values];
+  updatedValues[1] = newPhone;
+  await appendRowToFollowUpSheet(sheets, spreadsheetId, updatedValues);
+}
