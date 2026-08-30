@@ -4,6 +4,8 @@ import { handleWebhookEvent, verifySignature, verifyWebhook } from './webhook/fa
 
 const FB_APP_SECRET = process.env.FB_APP_SECRET;
 if (!FB_APP_SECRET) {
+  // Không được để server chạy ở trạng thái không xác thực được webhook — thiếu biến này thì
+  // signature check sẽ vô hiệu, cho phép request giả mạo bất kỳ đi qua (mục 10/11).
   throw new Error('FB_APP_SECRET chưa được cấu hình trong .env — không thể khởi động server an toàn.');
 }
 if (!process.env.FB_VERIFY_TOKEN) {
@@ -30,6 +32,8 @@ app.post('/webhook', (req: Request & { rawBody?: Buffer }, res: Response) => {
     return;
   }
 
+  // handleWebhookEvent tự bọc lỗi nội bộ (đã sendStatus(200) từ đầu) — không dùng next() ở đây
+  // vì response đã gửi rồi, gọi next() sau đó sẽ gây crash ERR_HTTP_HEADERS_SENT.
   handleWebhookEvent(req, res).catch((err) => {
     console.error('[handleWebhookEvent] unexpected error after response sent', err);
   });

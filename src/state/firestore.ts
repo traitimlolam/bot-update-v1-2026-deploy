@@ -21,6 +21,7 @@ function getApp(): App {
     const serviceAccount = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
     app = initializeApp({ credential: cert(serviceAccount), projectId });
   } else {
+    // Cloud Run/GCP môi trường mặc định có Application Default Credentials.
     app = initializeApp({ projectId });
   }
   return app;
@@ -62,6 +63,13 @@ export async function saveConversation(
 }
 
 const LOCKS_COLLECTION = 'locks';
+// TTL đủ dài để bao trọn 1 lượt runFlowTurn thực tế (gửi tối đa 3 tin, mỗi tin cách nhau 2s, cộng
+// retry mạng chậm cho cả Send API lẫn Sheets API — appendLead còn tự khoá lồng bên trong theo tab
+// Sheet). Nếu TTL ngắn hơn thời gian xử lý thật, khoá có thể hết hạn giữa chừng và một tiến trình
+// khác chiếm được khoá trong lúc tiến trình đầu vẫn đang chạy — tái diễn đúng race condition ban
+// đầu. Timeout chờ khoá (cho tiến trình đang đợi) cố tình ngắn hơn TTL: nếu chủ khoá thật sự crash,
+// khoá sẽ tự hết hạn và yêu cầu tiếp theo lấy được; yêu cầu đang đợi timeout trước đó chỉ log lỗi
+// (mục 10), không làm mất dữ liệu.
 const LOCK_TTL_MS = 90000;
 const LOCK_ACQUIRE_TIMEOUT_MS = 60000;
 const LOCK_POLL_MIN_MS = 200;
@@ -71,6 +79,13 @@ function sanitizeLockKey(key: string): string {
   return key.replace(/[/\\]/g, '_');
 }
 
+/**
+ * Khoá phân tán đơn giản dựa trên transaction atomic của Firestore (document `locks/{key}`,
+ * field `expiresAtMs`). Dùng để serialize các thao tác theo cùng 1 khoá (vd cùng 1 PSID, cùng
+ * 1 tab Sheet) — tránh 2 lệnh xử lý đồng thời ("lệnh chồng chéo") đọc cùng 1 state cũ rồi ghi đè
+ * lên nhau, gây mất lead hoặc trùng round-robin. Khoá tự hết hạn sau `LOCK_TTL_MS` nếu tiến trình
+ * giữ khoá bị crash giữa chừng, tránh deadlock vĩnh viễn.
+ */
 export async function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
   const db = getDb();
   const lockRef = db.collection(LOCKS_COLLECTION).doc(sanitizeLockKey(key));
@@ -99,7 +114,9 @@ export async function withLock<T>(key: string, fn: () => Promise<T>): Promise<T>
   try {
     return await fn();
   } finally {
-    await lockRef.delete().catch(() => {});
+    await lockRef.delete().catch(() => {
+      // Không chặn luồng chính nếu xoá khoá thất bại — khoá vẫn tự hết hạn theo expiresAtMs.
+    });
   }
 }
 
@@ -117,6 +134,7 @@ export async function logError(context: string, error: unknown, meta?: Record<st
       createdAt: Timestamp.now(),
     });
   } catch (loggingError) {
+    // Nếu Firestore cũng lỗi, không được để mất thông tin — fallback console (mục 10).
     console.error('[logError] failed to persist error to Firestore', loggingError);
     console.error(`[${context}]`, message, meta ?? '');
   }
