@@ -396,6 +396,30 @@ async function findLeadRowLocationByPhone(
   return null;
 }
 
+const LEAD_ROW_NOT_FOUND_RETRY_DELAYS_MS = [500, 1000, 2000];
+
+/**
+ * Google Sheets API đôi khi có độ trễ lan truyền ngắn giữa lúc ghi (`values.update` trong
+ * `appendLead`) và lúc đọc lại gần như ngay lập tức (`values.get` trong `findLeadRowLocationByPhone`)
+ * — nếu khách CLOSED nhắn lại rất nhanh ngay sau khi vừa chốt lead, có thể đọc không kịp thấy dòng
+ * vừa ghi dù dữ liệu đã tồn tại thật trên Sheet (khác với lỗi mạng/5xx mà `withRetry` đã xử lý).
+ * Thử lại thêm vài lần với khoảng nghỉ ngắn trước khi thực sự kết luận "không tìm thấy".
+ */
+async function findLeadRowLocationByPhoneWithRetry(
+  sheets: sheets_v4.Sheets,
+  spreadsheetId: string,
+  phone: string
+): Promise<LeadRowLocation | null> {
+  for (let attempt = 0; attempt <= LEAD_ROW_NOT_FOUND_RETRY_DELAYS_MS.length; attempt++) {
+    const location = await withRetry(() => findLeadRowLocationByPhone(sheets, spreadsheetId, phone));
+    if (location) return location;
+    if (attempt < LEAD_ROW_NOT_FOUND_RETRY_DELAYS_MS.length) {
+      await new Promise((resolve) => setTimeout(resolve, LEAD_ROW_NOT_FOUND_RETRY_DELAYS_MS[attempt]));
+    }
+  }
+  return null;
+}
+
 /**
  * Ghi `rowValues` (đúng 8 giá trị cột A-H) vào dòng trống tiếp theo của tab "Hỏi lại" (dò dòng trống
  * theo cột A, tái sử dụng đúng `findNextEmptyRow` — bỏ qua dòng đã có dữ liệu). Dùng chung cho cả
@@ -441,7 +465,7 @@ export async function copyLeadToFollowUpSheet(phone: string): Promise<void> {
   }
 
   const sheets = await getSheetsClient();
-  const location = await withRetry(() => findLeadRowLocationByPhone(sheets, spreadsheetId, phone));
+  const location = await findLeadRowLocationByPhoneWithRetry(sheets, spreadsheetId, phone);
   if (!location) {
     throw new Error(
       `copyLeadToFollowUpSheet: không tìm thấy dòng lead nào khớp số điện thoại ${phone} ở bất kỳ tab tháng nào`
@@ -468,7 +492,7 @@ export async function updateLeadPhoneAndCopyToFollowUpSheet(oldPhone: string, ne
   }
 
   const sheets = await getSheetsClient();
-  const location = await withRetry(() => findLeadRowLocationByPhone(sheets, spreadsheetId, oldPhone));
+  const location = await findLeadRowLocationByPhoneWithRetry(sheets, spreadsheetId, oldPhone);
   if (!location) {
     throw new Error(
       `updateLeadPhoneAndCopyToFollowUpSheet: không tìm thấy dòng lead nào khớp số điện thoại cũ ${oldPhone} ở bất kỳ tab tháng nào`
