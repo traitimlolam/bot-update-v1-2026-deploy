@@ -568,6 +568,15 @@ export async function handleWebhookEvent(req: Request, res: Response): Promise<v
         }
       }
 
+      // DEBUG TẠM THỜI: ghi lại nguyên trạng mọi "changes" nhận được (bất kể field gì) để chẩn đoán
+      // vì sao sự kiện comment không tới được handleFeedChange — xoá sau khi xác định xong nguyên nhân.
+      if (entry.changes && entry.changes.length > 0) {
+        await logError('DEBUG_rawFeedChanges', new Error('debug - not a real error'), {
+          changesCount: entry.changes.length,
+          changes: entry.changes,
+        });
+      }
+
       for (const change of entry.changes ?? []) {
         if (change.field !== 'feed') continue;
         try {
