@@ -118,10 +118,18 @@ function delay(ms: number): Promise<void> {
 /**
  * Gửi tuần tự danh sách message code, mỗi tin cách nhau >=2s kèm typing_on (mục 4).
  * Trả về PSID nếu recipient ban đầu là comment_id và Facebook trả về recipient_id thật.
+ *
+ * `keepOriginalRecipient` (mặc định false, giữ hành vi cũ cho luồng BUTTON/TEXT vốn đã gọi bằng
+ * { id: psid } — chuyển sang { id } sau tin đầu không ảnh hưởng gì vì đã là { id } sẵn): khi true,
+ * KHÔNG tự chuyển sang { id: resolvedPsid } sau tin đầu tiên dù Facebook có trả recipient_id — dùng
+ * cho trường hợp gửi tiếp M2/M3 qua Private Reply ({ comment_id }) cho người CHỈ MỚI comment, chưa
+ * từng chủ động nhắn tin: nếu đổi sang { id }, Facebook từ chối với lỗi 551/1545041 "Người này hiện
+ * không có mặt" vì người đó chưa mở cuộc trò chuyện thật — phải giữ nguyên comment_id cho MỌI tin.
  */
 async function sendMessageSequence(
   recipient: Recipient,
-  codes: MessageCode[]
+  codes: MessageCode[],
+  keepOriginalRecipient = false
 ): Promise<string | undefined> {
   const messages = loadMessages();
   let resolvedPsid: string | undefined;
@@ -132,7 +140,9 @@ async function sendMessageSequence(
     const recipientId = await sendText(currentRecipient, messages[codes[i]]);
     if (recipientId && !resolvedPsid) {
       resolvedPsid = recipientId;
-      currentRecipient = { id: recipientId };
+      if (!keepOriginalRecipient) {
+        currentRecipient = { id: recipientId };
+      }
     }
     if (i < codes.length - 1) {
       await delay(MIN_DELAY_BETWEEN_MESSAGES_MS);
@@ -484,7 +494,11 @@ async function handleFirstCommentWithoutPhone(commentId: string, commenterId: st
 
   try {
     await delay(MIN_DELAY_BETWEEN_MESSAGES_MS);
-    await sendMessageSequence({ id: resolvedPsid }, ['M2', 'M3']);
+    // Tiếp tục dùng { comment_id } thay vì { id: resolvedPsid } (mục 5.3): Facebook chỉ cho phép gửi
+    // tin thường (recipient theo id) tới người đã chủ động mở cuộc trò chuyện — người mới chỉ comment
+    // (chưa từng nhắn tin) sẽ bị từ chối với lỗi 551/1545041 "Người này hiện không có mặt" nếu đổi
+    // sang { id }. Private Reply qua comment_id không bị giới hạn này.
+    await sendMessageSequence({ comment_id: commentId }, ['M2', 'M3'], true);
     await saveConversation(resolvedPsid, { state: 'IN_PROGRESS', phone: null, assignedStaff: null });
   } catch (err) {
     await logError('handleFeedChange_sendRest', err, { commentId, commenterId, resolvedPsid });
