@@ -81,13 +81,13 @@ async function callSendApi(body: Record<string, unknown>): Promise<{ recipient_i
   });
 }
 
-type Recipient = { id: string } | { comment_id: string };
+export type Recipient = { id: string } | { comment_id: string };
 
-async function sendTypingOn(recipient: Recipient): Promise<void> {
+export async function sendTypingOn(recipient: Recipient): Promise<void> {
   await callSendApi({ recipient, sender_action: 'typing_on' });
 }
 
-async function sendText(recipient: Recipient, text: string): Promise<string | undefined> {
+export async function sendText(recipient: Recipient, text: string): Promise<string | undefined> {
   const result = await callSendApi({
     recipient,
     messaging_type: 'RESPONSE',
@@ -356,6 +356,14 @@ async function handleFirstOpen(psid: string): Promise<void> {
     const customerName = current?.customerName ?? (await fetchCustomerName(psid));
     await sendTypingOn({ id: psid });
     await sendQuickReplyButtons(psid, customerName);
+    if (!current) {
+      await saveConversation(psid, {
+        state: 'NEW',
+        phone: null,
+        assignedStaff: null,
+        customerName: customerName ?? null,
+      });
+    }
   } catch (err) {
     await logError('handleFirstOpen', err, { psid });
   }
@@ -677,6 +685,8 @@ export async function handleWebhookEvent(req: Request, res: Response): Promise<v
         try {
           if (!event.message && !event.postback) continue;
           if (event.message?.is_echo) continue;
+          // Ngăn ngừa mọi nguy cơ lặp tin nếu tin nhắn đến từ chính Page ID
+          if (pageId && event.sender.id === pageId) continue;
           await handleMessagingEvent(event);
         } catch (err) {
           await logError('handleMessagingEvent', err, { event });

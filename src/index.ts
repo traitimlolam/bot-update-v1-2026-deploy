@@ -40,13 +40,38 @@ app.post('/webhook', (req: Request & { rawBody?: Buffer }, res: Response) => {
   });
 });
 
+import { runDailyReminderSweep, startDailyReminderScheduler } from './services/reminderService';
+
 app.get('/privacy', (_req, res) => res.type('html').send(PRIVACY_POLICY_HTML));
 app.get('/data-deletion', (_req, res) => res.type('html').send(PRIVACY_POLICY_HTML));
 app.get('/health', (_req, res) => res.sendStatus(200));
 
+app.get('/cron/daily-reminder', async (req: Request, res: Response) => {
+  try {
+    const force = req.query.force === 'true';
+    const dryRun = req.query.dryRun === 'true';
+    const result = await runDailyReminderSweep({ force, dryRun });
+    res.status(200).json(result);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.post('/cron/daily-reminder', async (req: Request, res: Response) => {
+  try {
+    const force = req.query.force === 'true';
+    const dryRun = req.query.dryRun === 'true';
+    const result = await runDailyReminderSweep({ force, dryRun });
+    res.status(200).json(result);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 const port = Number(process.env.PORT) || 3000;
 app.listen(port, () => {
   console.log(`Bot server listening on port ${port}`);
+  startDailyReminderScheduler();
 });
 
 export { app };

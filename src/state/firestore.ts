@@ -36,6 +36,7 @@ export function getDb(): Firestore {
 
 export interface StoredConversation extends ConversationRecord {
   lastFlowSentAt: Timestamp | null;
+  lastReminderSentDate?: string | null;
 }
 
 const CONVERSATIONS_COLLECTION = 'conversations';
@@ -57,6 +58,21 @@ export async function saveConversation(
       {
         ...record,
         lastFlowSentAt: Timestamp.now(),
+      },
+      { merge: true }
+    );
+}
+
+export async function updateConversationReminder(
+  psid: string,
+  data: Partial<ConversationRecord> & { lastReminderSentDate: string }
+): Promise<void> {
+  await getDb()
+    .collection(CONVERSATIONS_COLLECTION)
+    .doc(psid)
+    .set(
+      {
+        ...data,
       },
       { merge: true }
     );
