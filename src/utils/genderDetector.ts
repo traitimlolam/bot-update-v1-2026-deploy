@@ -148,7 +148,7 @@ export function formatPersonalizedMessage(
 ): string {
   if (!template) return '';
 
-  const { gender, callName } = analyzeVietnameseName(customerName);
+  const { gender } = analyzeVietnameseName(customerName);
 
   let pronounLower = 'anh/chị';
   let pronounCap = 'Anh/chị';
@@ -163,11 +163,12 @@ export function formatPersonalizedMessage(
     pronounCap = 'Chị';
     pronounTitle = 'Chị';
   } else {
-    // UNKNOWN: Điền thẳng tên khách vào nếu có tên
-    if (callName) {
-      pronounLower = callName;
-      pronounCap = callName;
-      pronounTitle = callName;
+    // UNKNOWN: Điền đầy đủ cả họ tên của khách vào nếu có tên
+    const fullName = customerName?.trim();
+    if (fullName) {
+      pronounLower = fullName;
+      pronounCap = fullName;
+      pronounTitle = fullName;
     } else {
       return template;
     }
