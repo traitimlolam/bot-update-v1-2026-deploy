@@ -211,16 +211,18 @@ export function findLastValidAssignment(
 }
 
 /**
- * Tên tab tháng liền trước `tabName` (mục 8b/9): "Tháng 10" -> "Tháng 9", "Tháng 11" -> "Tháng 10".
- * "Tháng 9" là tab gốc (không có tab nào trước đó) nên trả về `null`, cũng như bất kỳ tên tab nào
- * không theo đúng định dạng "Tháng {N}" (mục 14 — chuỗi lùi tab chỉ hiểu đúng quy ước đặt tên này).
+ * Tên tab tháng liền trước `tabName` (mục 8b/9): "Tháng 10" -> "Tháng 9", "Tháng 11" -> "Tháng 10",
+ * và vòng qua năm mới "Tháng 1" -> "Tháng 12" (mục 8b/14 chấp nhận không phân biệt năm trong tên tab).
+ * Chỉ đúng "Tháng 9" mới là tab gốc (không có tab nào trước đó) nên trả về `null` ở đó, cũng như
+ * bất kỳ tên tab nào không theo đúng định dạng "Tháng {N}" (mục 14 — chuỗi lùi tab chỉ hiểu đúng
+ * quy ước đặt tên này).
  */
-function previousMonthTabName(tabName: string): string | null {
+export function previousMonthTabName(tabName: string): string | null {
   const match = tabName.match(/^Tháng (\d+)$/);
   if (!match) return null;
   const month = Number(match[1]);
-  if (month <= 9) return null;
-  return `Tháng ${month - 1}`;
+  if (month === 9) return null; // "Tháng 9" là tab gốc — dừng lại đúng ở đây, không lùi tiếp
+  return `Tháng ${month === 1 ? 12 : month - 1}`;
 }
 
 /**

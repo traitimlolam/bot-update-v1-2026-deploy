@@ -56,6 +56,43 @@ interface ConversationCandidate {
   customerName: string | null;
 }
 
+let cachedPageId: string | null | undefined; // undefined = chưa từng thử lấy trong tiến trình này
+
+/**
+ * Xác định ID của chính Fanpage để loại nó ra khỏi danh sách participants của 1 conversation.
+ * Ưu tiên `FB_PAGE_ID` nếu được cấu hình sẵn (không bắt buộc, mục 11 không yêu cầu biến này);
+ * nếu không có, tự tra cứu qua Graph API `GET /me?fields=id` bằng chính `FB_PAGE_ACCESS_TOKEN`
+ * đã cấu hình — endpoint này chỉ trả về thông tin cơ bản của Page sở hữu token, không cần
+ * App Review. Kết quả được cache lại trong tiến trình để không gọi API lặp lại mỗi lần sweep.
+ */
+async function getPageId(): Promise<string | null> {
+  if (process.env.FB_PAGE_ID) return process.env.FB_PAGE_ID;
+  if (cachedPageId !== undefined) return cachedPageId;
+
+  const pageAccessToken = process.env.FB_PAGE_ACCESS_TOKEN;
+  if (!pageAccessToken) {
+    cachedPageId = null;
+    return cachedPageId;
+  }
+
+  try {
+    const res = await fetch(`${GRAPH_BASE_URL}/me?fields=id&access_token=${pageAccessToken}`);
+    if (!res.ok) {
+      const errText = await res.text();
+      await logError('getPageId', new Error(`Graph API error ${res.status}: ${errText}`));
+      cachedPageId = null;
+      return cachedPageId;
+    }
+    const data = (await res.json()) as { id?: string };
+    cachedPageId = data.id ?? null;
+  } catch (err) {
+    await logError('getPageId', err);
+    cachedPageId = null;
+  }
+
+  return cachedPageId;
+}
+
 /**
  * Quét các cuộc trò chuyện trên Fanpage phát sinh tương tác trong ngày từ Graph API.
  */
@@ -65,6 +102,14 @@ async function fetchPageConversationsToday(
   const map = new Map<string, ConversationCandidate>();
   const pageAccessToken = process.env.FB_PAGE_ACCESS_TOKEN;
   if (!pageAccessToken) return map;
+
+  const pageId = await getPageId();
+  if (!pageId) {
+    // Không xác định được ID của Page thì không thể lọc đúng participant nào là khách —
+    // bỏ qua nguồn này thay vì đoán bừa (dựa vào fetchFirestoreConversationsToday làm nguồn dự phòng).
+    await logError('fetchPageConversationsToday', new Error('Không xác định được FB Page ID, bỏ qua nguồn Graph API conversations'));
+    return map;
+  }
 
   try {
     const url = `${GRAPH_BASE_URL}/me/conversations?fields=id,updated_time,participants,senders&limit=100&access_token=${pageAccessToken}`;
@@ -88,7 +133,7 @@ async function fetchPageConversationsToday(
       if (updatedTime >= startOfToday) {
         const participants = conv.participants?.data ?? [];
         // Lấy người tham gia không phải là ID của Page
-        const customer = participants.find((p) => p.id !== process.env.FB_PAGE_ID);
+        const customer = participants.find((p) => p.id !== pageId);
         if (customer && customer.id) {
           map.set(customer.id, {
             psid: customer.id,
@@ -151,9 +196,9 @@ export async function runDailyReminderSweep(options?: {
   dryRun?: boolean;
 }): Promise<SweepResult> {
   const { todayStr, startOfToday } = getVietnamDateRange();
-  const lockKey = options?.force
-    ? `dailyReminderSweep:force:${Date.now()}`
-    : `dailyReminderSweep:${todayStr}`;
+  // Khoá chung theo ngày dù force hay không — `force` chỉ bỏ qua dedup `lastReminderSentDate`
+  // (bên dưới), tuyệt đối không được bỏ qua khoá chống 2 sweep chạy chồng nhau (mục 5.4).
+  const lockKey = `dailyReminderSweep:${todayStr}`;
 
   return withLock(lockKey, async () => {
     // 1. Thu thập danh sách khách hàng tương tác trong ngày từ cả Graph API và Firestore
