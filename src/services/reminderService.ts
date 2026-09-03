@@ -20,12 +20,15 @@ export interface VietnamDateRange {
   todayStr: string; // YYYY-MM-DD
   startOfToday: Date;
   endOfToday: Date;
+  windowStart: Date; // 20h01 ngày hôm trước theo giờ VN
+  windowEnd: Date; // 20h00 ngày hôm sau (hôm nay) theo giờ VN
   vnHours: number;
   vnMinutes: number;
 }
 
 /**
- * Tính toán mốc thời gian trong ngày theo múi giờ Việt Nam (UTC+7).
+ * Tính toán mốc thời gian theo múi giờ Việt Nam (UTC+7):
+ * - Khung giờ quét: từ 20h01 ngày hôm trước đến 20h00 ngày hôm sau (hôm nay).
  */
 export function getVietnamDateRange(refDate = new Date()): VietnamDateRange {
   const vnTime = new Date(refDate.getTime() + VIETNAM_TIMEZONE_OFFSET_HOURS * 3600000);
@@ -48,7 +51,15 @@ export function getVietnamDateRange(refDate = new Date()): VietnamDateRange {
     Date.UTC(year, monthIdx, day, 24 - VIETNAM_TIMEZONE_OFFSET_HOURS, 0, 0, -1)
   );
 
-  return { todayStr, startOfToday, endOfToday, vnHours, vnMinutes };
+  // Khung giờ quét: từ 20h01 ngày hôm trước đến 20h00 ngày hôm sau (hôm nay) theo giờ VN
+  const windowStart = new Date(
+    Date.UTC(year, monthIdx, day - 1, 20 - VIETNAM_TIMEZONE_OFFSET_HOURS, 1, 0, 0)
+  );
+  const windowEnd = new Date(
+    Date.UTC(year, monthIdx, day, 20 - VIETNAM_TIMEZONE_OFFSET_HOURS, 0, 0, 0)
+  );
+
+  return { todayStr, startOfToday, endOfToday, windowStart, windowEnd, vnHours, vnMinutes };
 }
 
 interface ConversationCandidate {
@@ -94,10 +105,11 @@ async function getPageId(): Promise<string | null> {
 }
 
 /**
- * Quét các cuộc trò chuyện trên Fanpage phát sinh tương tác trong ngày từ Graph API.
+ * Quét các cuộc trò chuyện trên Fanpage có tin nhắn trong khung giờ từ 20h01 hôm trước đến 20h00 hôm nay.
  */
-async function fetchPageConversationsToday(
-  startOfToday: Date
+async function fetchPageConversations(
+  windowStart: Date,
+  windowEnd: Date
 ): Promise<Map<string, ConversationCandidate>> {
   const map = new Map<string, ConversationCandidate>();
   const pageAccessToken = process.env.FB_PAGE_ACCESS_TOKEN;
@@ -106,8 +118,11 @@ async function fetchPageConversationsToday(
   const pageId = await getPageId();
   if (!pageId) {
     // Không xác định được ID của Page thì không thể lọc đúng participant nào là khách —
-    // bỏ qua nguồn này thay vì đoán bừa (dựa vào fetchFirestoreConversationsToday làm nguồn dự phòng).
-    await logError('fetchPageConversationsToday', new Error('Không xác định được FB Page ID, bỏ qua nguồn Graph API conversations'));
+    // bỏ qua nguồn này thay vì đoán bừa (dựa vào fetchFirestoreConversations làm nguồn dự phòng).
+    await logError(
+      'fetchPageConversations',
+      new Error('Không xác định được FB Page ID, bỏ qua nguồn Graph API conversations')
+    );
     return map;
   }
 
@@ -116,7 +131,7 @@ async function fetchPageConversationsToday(
     const res = await fetch(url);
     if (!res.ok) {
       const errText = await res.text();
-      await logError('fetchPageConversationsToday', new Error(`Graph API error ${res.status}: ${errText}`));
+      await logError('fetchPageConversations', new Error(`Graph API error ${res.status}: ${errText}`));
       return map;
     }
     const data = (await res.json()) as {
@@ -130,7 +145,7 @@ async function fetchPageConversationsToday(
     const conversations = data.data ?? [];
     for (const conv of conversations) {
       const updatedTime = new Date(conv.updated_time);
-      if (updatedTime >= startOfToday) {
+      if (updatedTime >= windowStart && updatedTime <= windowEnd) {
         const participants = conv.participants?.data ?? [];
         // Lấy người tham gia không phải là ID của Page
         const customer = participants.find((p) => p.id !== pageId);
@@ -143,21 +158,22 @@ async function fetchPageConversationsToday(
       }
     }
   } catch (err) {
-    await logError('fetchPageConversationsToday', err);
+    await logError('fetchPageConversations', err);
   }
 
   return map;
 }
 
 /**
- * Quét các bản ghi Firestore có tương tác trong ngày (lastFlowSentAt >= startOfToday).
+ * Quét các bản ghi Firestore có tương tác trong khung giờ từ 20h01 hôm trước đến 20h00 hôm nay.
  */
-async function fetchFirestoreConversationsToday(
-  startOfToday: Date
+async function fetchFirestoreConversations(
+  windowStart: Date,
+  windowEnd: Date
 ): Promise<Map<string, ConversationCandidate>> {
   const map = new Map<string, ConversationCandidate>();
   try {
-    const startTimestamp = Timestamp.fromDate(startOfToday);
+    const startTimestamp = Timestamp.fromDate(windowStart);
     const snap = await getDb()
       .collection('conversations')
       .where('lastFlowSentAt', '>=', startTimestamp)
@@ -165,13 +181,19 @@ async function fetchFirestoreConversationsToday(
 
     for (const doc of snap.docs) {
       const data = doc.data();
-      map.set(doc.id, {
-        psid: doc.id,
-        customerName: (data.customerName as string) ?? null,
-      });
+      const lastFlowSentAt = data.lastFlowSentAt as Timestamp | undefined;
+      if (lastFlowSentAt) {
+        const sentDate = lastFlowSentAt.toDate();
+        if (sentDate <= windowEnd) {
+          map.set(doc.id, {
+            psid: doc.id,
+            customerName: (data.customerName as string) ?? null,
+          });
+        }
+      }
     }
   } catch (err) {
-    await logError('fetchFirestoreConversationsToday', err);
+    await logError('fetchFirestoreConversations', err);
   }
   return map;
 }
@@ -186,7 +208,8 @@ export interface SweepResult {
 }
 
 /**
- * Thực hiện rà soát và gửi tin nhắn lúc 20h hàng ngày cho các khách chưa cho SĐT trong ngày.
+ * Thực hiện rà soát và gửi tin nhắn lúc 20h hàng ngày cho các khách chưa cho SĐT
+ * (có tin nhắn trong khung giờ từ 20h01 ngày hôm trước đến 20h00 ngày hôm sau).
  * - Khóa tổng: `dailyReminderSweep:${todayStr}` chống chạy đè / lặp lệnh khi có nhiều container.
  * - Khóa từng khách: `psid:${psid}` chống xung đột khi khách đang chat cùng lúc.
  * - Deduplication: Ghi nhận `lastReminderSentDate = todayStr` để tuyệt đối không gửi lặp cho 1 khách.
@@ -195,16 +218,16 @@ export async function runDailyReminderSweep(options?: {
   force?: boolean;
   dryRun?: boolean;
 }): Promise<SweepResult> {
-  const { todayStr, startOfToday } = getVietnamDateRange();
+  const { todayStr, windowStart, windowEnd } = getVietnamDateRange();
   // Khoá chung theo ngày dù force hay không — `force` chỉ bỏ qua dedup `lastReminderSentDate`
   // (bên dưới), tuyệt đối không được bỏ qua khoá chống 2 sweep chạy chồng nhau (mục 5.4).
   const lockKey = `dailyReminderSweep:${todayStr}`;
 
   return withLock(lockKey, async () => {
-    // 1. Thu thập danh sách khách hàng tương tác trong ngày từ cả Graph API và Firestore
+    // 1. Thu thập danh sách khách hàng tương tác từ 20h01 hôm trước đến 20h00 hôm nay từ Graph API và Firestore
     const [pageCandidates, firestoreCandidates] = await Promise.all([
-      fetchPageConversationsToday(startOfToday),
-      fetchFirestoreConversationsToday(startOfToday),
+      fetchPageConversations(windowStart, windowEnd),
+      fetchFirestoreConversations(windowStart, windowEnd),
     ]);
 
     // Hợp nhất danh sách ứng viên (loại bỏ trùng PSID)
