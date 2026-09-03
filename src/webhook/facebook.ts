@@ -261,13 +261,41 @@ function isKnownButtonPayload(
 }
 
 /**
- * Ghép tên khách đúng thứ tự họ tên Việt Nam (mục 8): với tài khoản Facebook đặt tên kiểu Việt
- * Nam, Graph API trả `last_name` = họ + tên đệm (vd "Nguyễn Văn") và `first_name` = tên gọi/từ
- * cuối (vd "A") — ngược thứ tự first/last name tiếng Anh — nên phải ghép `last_name` trước để ra
- * đúng "Nguyễn Văn A", không đảo ngược thành `first_name` + `last_name`.
+ * Lấy tên khách hàng tương tác với Page (mục 8):
+ * 1. Ưu tiên tra cứu qua `/me/conversations?user_id=${psid}&fields=participants,senders`:
+ *    Vì Page Access Token thuộc về Admin của Page, API Inbox của chính Page luôn trả về đầy đủ
+ *    họ tên Facebook của người nhắn (`participants.data[].name`) đối với 100% khách hàng
+ *    (kể cả người lạ) mà KHÔNG bị giới hạn bởi App Review hay yêu cầu xác minh doanh nghiệp.
+ * 2. Fallback sang `/{psid}?fields=first_name,last_name` cho trường hợp đặc biệt hoặc tester.
  */
 async function fetchCustomerName(psid: string): Promise<string | null> {
   const pageAccessToken = process.env.FB_PAGE_ACCESS_TOKEN;
+  if (!pageAccessToken) return null;
+
+  // Cách 1: Query qua Page Conversations Inbox (hoạt động cho tất cả người dùng thật)
+  try {
+    const convUrl = `${GRAPH_BASE_URL}/me/conversations?user_id=${psid}&fields=participants,senders&access_token=${pageAccessToken}`;
+    const convRes = await fetch(convUrl);
+    if (convRes.ok) {
+      const convData = (await convRes.json()) as {
+        data?: Array<{
+          participants?: { data?: Array<{ id: string; name?: string }> };
+          senders?: { data?: Array<{ id: string; name?: string }> };
+        }>;
+      };
+      const conversation = convData.data?.[0];
+      const participant =
+        conversation?.participants?.data?.find((p) => p.id === psid) ||
+        conversation?.senders?.data?.find((s) => s.id === psid);
+      if (participant?.name && participant.name.trim()) {
+        return participant.name.trim();
+      }
+    }
+  } catch {
+    // fallback sang cách 2
+  }
+
+  // Cách 2: Query User Profile Node
   try {
     const response = await fetch(
       `${GRAPH_BASE_URL}/${psid}?fields=first_name,last_name&access_token=${pageAccessToken}`
