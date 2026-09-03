@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import { handleWebhookEvent, verifySignature, verifyWebhook } from './webhook/facebook';
+import { PRIVACY_POLICY_HTML } from './privacyPolicy';
 
 const FB_APP_SECRET = process.env.FB_APP_SECRET;
 if (!FB_APP_SECRET) {
@@ -39,6 +40,8 @@ app.post('/webhook', (req: Request & { rawBody?: Buffer }, res: Response) => {
   });
 });
 
+app.get('/privacy', (_req, res) => res.type('html').send(PRIVACY_POLICY_HTML));
+app.get('/data-deletion', (_req, res) => res.type('html').send(PRIVACY_POLICY_HTML));
 app.get('/health', (_req, res) => res.sendStatus(200));
 
 const port = Number(process.env.PORT) || 3000;
