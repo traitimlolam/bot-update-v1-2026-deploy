@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import * as crypto from 'crypto';
 import { loadMessages } from '../config/loadConfig';
+import { formatPersonalizedMessage } from '../utils/genderDetector';
 import {
   ConversationRecord,
   FlowInput,
@@ -95,13 +96,14 @@ async function sendText(recipient: Recipient, text: string): Promise<string | un
   return result.recipient_id;
 }
 
-async function sendQuickReplyButtons(psid: string): Promise<void> {
+async function sendQuickReplyButtons(psid: string, customerName?: string | null): Promise<void> {
   const messages = loadMessages();
+  const text = formatPersonalizedMessage(messages.M1, customerName);
   await callSendApi({
     recipient: { id: psid },
     messaging_type: 'RESPONSE',
     message: {
-      text: messages.M1,
+      text,
       quick_replies: messages.buttons.map((b) => ({
         content_type: 'text',
         title: b.label,
@@ -129,7 +131,8 @@ function delay(ms: number): Promise<void> {
 async function sendMessageSequence(
   recipient: Recipient,
   codes: MessageCode[],
-  keepOriginalRecipient = false
+  keepOriginalRecipient = false,
+  customerName?: string | null
 ): Promise<string | undefined> {
   const messages = loadMessages();
   let resolvedPsid: string | undefined;
@@ -137,7 +140,8 @@ async function sendMessageSequence(
 
   for (let i = 0; i < codes.length; i++) {
     await sendTypingOn(currentRecipient);
-    const recipientId = await sendText(currentRecipient, messages[codes[i]]);
+    const text = formatPersonalizedMessage(messages[codes[i]], customerName);
+    const recipientId = await sendText(currentRecipient, text);
     if (recipientId && !resolvedPsid) {
       resolvedPsid = recipientId;
       if (!keepOriginalRecipient) {
@@ -183,17 +187,26 @@ export async function runFlowTurn(
     const current = await loadOrCreateConversation(psid);
     const result = processInput(current, input);
 
+    // Lấy tên khách để xưng hô chuẩn xác: ưu tiên tên đã lưu trong session, nếu chưa có thì fetch
+    let customerName = current.customerName ?? null;
+    if (!customerName) {
+      customerName = await getCustomerName();
+    }
+
     if (result.messagesToSend.length > 0) {
       try {
         const targetRecipient: Recipient = overrideRecipient ?? { id: psid };
         const keepOriginal = overrideRecipient !== undefined && 'comment_id' in overrideRecipient;
-        await sendMessageSequence(targetRecipient, result.messagesToSend, keepOriginal);
+        await sendMessageSequence(targetRecipient, result.messagesToSend, keepOriginal, customerName);
       } catch (err) {
         await logError('sendMessageSequence', err, { psid, input });
       }
     }
 
-    let finalRecord = result.record;
+    let finalRecord: ConversationRecord = {
+      ...result.record,
+      customerName: customerName ?? current.customerName ?? null,
+    };
 
     if (result.leadPhone) {
       try {
@@ -340,8 +353,9 @@ async function handleFirstOpen(psid: string): Promise<void> {
     if (current && current.state === 'CLOSED') {
       return;
     }
+    const customerName = current?.customerName ?? (await fetchCustomerName(psid));
     await sendTypingOn({ id: psid });
-    await sendQuickReplyButtons(psid);
+    await sendQuickReplyButtons(psid, customerName);
   } catch (err) {
     await logError('handleFirstOpen', err, { psid });
   }
@@ -408,7 +422,8 @@ async function handleFirstCommentWithValidPhone(
   let resolvedPsid: string | undefined;
   try {
     await sendTypingOn({ comment_id: commentId });
-    resolvedPsid = await sendText({ comment_id: commentId }, messages.M5);
+    const text = formatPersonalizedMessage(messages.M5, customerName);
+    resolvedPsid = await sendText({ comment_id: commentId }, text);
   } catch (err) {
     await logError('handleFeedChange_sendM5', err, { commentId, commenterId });
     return;
@@ -453,7 +468,12 @@ async function handleFirstCommentWithValidPhone(
   try {
     // Chốt lead trực tiếp từ comment -> cột E luôn là "Cmt" (mục 8, AC10/AC13).
     const assignedStaff = await appendLead({ phone, customerName, source: 'Cmt' });
-    await saveConversation(resolvedPsid, { state: 'CLOSED', phone, assignedStaff });
+    await saveConversation(resolvedPsid, {
+      state: 'CLOSED',
+      phone,
+      assignedStaff,
+      customerName: customerName ?? null,
+    });
   } catch (err) {
     // Không được để mất lead (mục 10) dù đến từ comment.
     await logError('handleFeedChange_appendLead', err, { commentId, commenterId, resolvedPsid, phone });
@@ -469,12 +489,14 @@ async function handleFirstCommentWithValidPhone(
 async function handleFirstCommentWithInvalidPhone(
   commentId: string,
   commenterId: string,
-  errorMessageCode: MessageCode
+  errorMessageCode: MessageCode,
+  customerName?: string | null
 ): Promise<void> {
   const messages = loadMessages();
   try {
     await sendTypingOn({ comment_id: commentId });
-    const resolvedPsid = await sendText({ comment_id: commentId }, messages[errorMessageCode]);
+    const text = formatPersonalizedMessage(messages[errorMessageCode], customerName);
+    const resolvedPsid = await sendText({ comment_id: commentId }, text);
     if (resolvedPsid) {
       await saveMappedPsid(commenterId, resolvedPsid);
     }
@@ -496,12 +518,17 @@ async function handleFirstCommentWithInvalidPhone(
  *   M1→M2→M3, dù là hỏi lần đầu hay "hỏi lại" khi đang IN_PROGRESS (mục 5.2/6, AC8/AC9) — không
  *   còn dừng giữa chừng ở M1 như hành vi cũ trước khi có quy tắc "hỏi lại".
  */
-async function handleFirstCommentWithoutPhone(commentId: string, commenterId: string): Promise<void> {
+async function handleFirstCommentWithoutPhone(
+  commentId: string,
+  commenterId: string,
+  customerName?: string | null
+): Promise<void> {
   const messages = loadMessages();
   let resolvedPsid: string | undefined;
   try {
     await sendTypingOn({ comment_id: commentId });
-    resolvedPsid = await sendText({ comment_id: commentId }, messages.M1);
+    const text = formatPersonalizedMessage(messages.M1, customerName);
+    resolvedPsid = await sendText({ comment_id: commentId }, text);
   } catch (err) {
     await logError('handleFeedChange_sendM1', err, { commentId, commenterId });
     return;
@@ -535,8 +562,13 @@ async function handleFirstCommentWithoutPhone(commentId: string, commenterId: st
     // tin thường (recipient theo id) tới người đã chủ động mở cuộc trò chuyện — người mới chỉ comment
     // (chưa từng nhắn tin) sẽ bị từ chối với lỗi 551/1545041 "Người này hiện không có mặt" nếu đổi
     // sang { id }. Private Reply qua comment_id không bị giới hạn này.
-    await sendMessageSequence({ comment_id: commentId }, ['M2', 'M3'], true);
-    await saveConversation(resolvedPsid, { state: 'IN_PROGRESS', phone: null, assignedStaff: null });
+    await sendMessageSequence({ comment_id: commentId }, ['M2', 'M3'], true, customerName);
+    await saveConversation(resolvedPsid, {
+      state: 'IN_PROGRESS',
+      phone: null,
+      assignedStaff: null,
+      customerName: customerName ?? null,
+    });
   } catch (err) {
     await logError('handleFeedChange_sendRest', err, { commentId, commenterId, resolvedPsid });
   }
@@ -596,9 +628,14 @@ async function handleFeedChange(value: FeedCommentValue, pageId?: string): Promi
     } else if (phoneCheck.valid && phoneCheck.normalizedPhone) {
       await handleFirstCommentWithValidPhone(commentId, commenterId, customerName, phoneCheck.normalizedPhone);
     } else if (phoneCheck.errorType !== null) {
-      await handleFirstCommentWithInvalidPhone(commentId, commenterId, phoneErrorToMessage(phoneCheck.errorType));
+      await handleFirstCommentWithInvalidPhone(
+        commentId,
+        commenterId,
+        phoneErrorToMessage(phoneCheck.errorType),
+        customerName
+      );
     } else {
-      await handleFirstCommentWithoutPhone(commentId, commenterId);
+      await handleFirstCommentWithoutPhone(commentId, commenterId, customerName);
     }
 
     // Sau khi xử lý và gửi tin nhắn riêng cho khách xong -> ẩn comment trên bài viết đi

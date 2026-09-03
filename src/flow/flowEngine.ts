@@ -6,10 +6,11 @@ export interface ConversationRecord {
   state: ConversationState;
   phone: string | null;
   assignedStaff: string | null;
+  customerName?: string | null;
 }
 
 export function newConversation(): ConversationRecord {
-  return { state: 'NEW', phone: null, assignedStaff: null };
+  return { state: 'NEW', phone: null, assignedStaff: null, customerName: null };
 }
 
 export type MessageCode = 'M1' | 'M2' | 'M3' | 'M4' | 'M5' | 'M6_SHORT' | 'M6_LONG' | 'M6_INVALID' | 'M7';
@@ -121,6 +122,7 @@ export function processInput(current: ConversationRecord, input: FlowInput): Flo
       state: 'CLOSED',
       phone: phoneCheck.normalizedPhone,
       assignedStaff: current.assignedStaff,
+      customerName: current.customerName ?? null,
     };
     return {
       record,
