@@ -543,6 +543,29 @@ async function handleFirstCommentWithoutPhone(commentId: string, commenterId: st
 }
 
 /**
+ * Ẩn comment trên Fanpage sau khi bot đã xử lý và gửi tin nhắn riêng cho khách xong:
+ * Tránh để lộ số điện thoại, thông tin khách hàng trên bài viết công khai và chống cướp khách.
+ */
+async function hideComment(commentId: string): Promise<void> {
+  const pageAccessToken = process.env.FB_PAGE_ACCESS_TOKEN;
+  if (!pageAccessToken) return;
+
+  try {
+    const res = await fetch(`${GRAPH_BASE_URL}/${commentId}?is_hidden=true&access_token=${pageAccessToken}`, {
+      method: 'POST',
+    });
+    if (!res.ok) {
+      const errBody = await res.text();
+      await logError('hideComment', new Error(`Facebook hide comment error ${res.status}: ${errBody}`), {
+        commentId,
+      });
+    }
+  } catch (err) {
+    await logError('hideComment', err, { commentId });
+  }
+}
+
+/**
  * Khoá theo commenterId (R7): người comment 2 lần liên tiếp rất nhanh (trước khi lượt đầu kịp
  * phân giải xong PSID qua Private Reply) sẽ khiến cả 2 lượt cùng thấy `getMappedPsid` trả về null
  * và cùng mở luồng M1→M2→M3 lần nữa — khách nhận trùng tin, và bản ghi PSID cuối cùng có thể lệch
@@ -570,22 +593,16 @@ async function handleFeedChange(value: FeedCommentValue, pageId?: string): Promi
 
     if (mappedPsid) {
       await handleMappedCommentTurn(mappedPsid, commentId, commentText, customerName);
-      return;
-    }
-
-    // Chưa từng phân giải PSID cho người này qua comment — quyết định nhánh dựa trên chính nội
-    // dung comment (mục 5.3) trước khi biết được state hội thoại thật.
-    if (phoneCheck.valid && phoneCheck.normalizedPhone) {
+    } else if (phoneCheck.valid && phoneCheck.normalizedPhone) {
       await handleFirstCommentWithValidPhone(commentId, commenterId, customerName, phoneCheck.normalizedPhone);
-      return;
-    }
-
-    if (phoneCheck.errorType !== null) {
+    } else if (phoneCheck.errorType !== null) {
       await handleFirstCommentWithInvalidPhone(commentId, commenterId, phoneErrorToMessage(phoneCheck.errorType));
-      return;
+    } else {
+      await handleFirstCommentWithoutPhone(commentId, commenterId);
     }
 
-    await handleFirstCommentWithoutPhone(commentId, commenterId);
+    // Sau khi xử lý và gửi tin nhắn riêng cho khách xong -> ẩn comment trên bài viết đi
+    await hideComment(commentId);
   });
 }
 
@@ -644,4 +661,4 @@ export async function handleWebhookEvent(req: Request, res: Response): Promise<v
   }
 }
 
-export { handleFirstOpen, handleFeedChange };
+export { handleFirstOpen, handleFeedChange, hideComment };
