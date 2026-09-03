@@ -21,7 +21,7 @@ import { withRetry } from '../util/retry';
 
 const GRAPH_API_VERSION = 'v19.0';
 const GRAPH_BASE_URL = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
-const MIN_DELAY_BETWEEN_MESSAGES_MS = 2000;
+const MIN_DELAY_BETWEEN_MESSAGES_MS = process.env.NODE_ENV === 'test' ? 0 : 2000;
 
 // ---------------------------------------------------------------------------
 // Verify GET (Facebook webhook handshake)
@@ -176,7 +176,8 @@ async function loadOrCreateConversation(psid: string): Promise<ConversationRecor
 export async function runFlowTurn(
   psid: string,
   input: FlowInput,
-  getCustomerName: () => Promise<string | null>
+  getCustomerName: () => Promise<string | null>,
+  overrideRecipient?: Recipient
 ): Promise<void> {
   await withLock(`psid:${psid}`, async () => {
     const current = await loadOrCreateConversation(psid);
@@ -184,7 +185,9 @@ export async function runFlowTurn(
 
     if (result.messagesToSend.length > 0) {
       try {
-        await sendMessageSequence({ id: psid }, result.messagesToSend);
+        const targetRecipient: Recipient = overrideRecipient ?? { id: psid };
+        const keepOriginal = overrideRecipient !== undefined && 'comment_id' in overrideRecipient;
+        await sendMessageSequence(targetRecipient, result.messagesToSend, keepOriginal);
       } catch (err) {
         await logError('sendMessageSequence', err, { psid, input });
       }
@@ -349,10 +352,16 @@ async function saveMappedPsid(commenterId: string, psid: string): Promise<void> 
  */
 async function handleMappedCommentTurn(
   psid: string,
+  commentId: string,
   commentText: string,
   customerName: string | null
 ): Promise<void> {
-  await runFlowTurn(psid, { type: 'FEED_COMMENT', text: commentText }, async () => customerName);
+  await runFlowTurn(
+    psid,
+    { type: 'FEED_COMMENT', text: commentText },
+    async () => customerName,
+    { comment_id: commentId }
+  );
 }
 
 /**
@@ -511,8 +520,14 @@ async function handleFirstCommentWithoutPhone(commentId: string, commenterId: st
  * và cùng mở luồng M1→M2→M3 lần nữa — khách nhận trùng tin, và bản ghi PSID cuối cùng có thể lệch
  * tuỳ lượt nào lưu sau. Khoá đảm bảo lượt thứ 2 luôn thấy PSID đã được lượt đầu phân giải xong.
  */
-async function handleFeedChange(value: FeedCommentValue): Promise<void> {
+async function handleFeedChange(value: FeedCommentValue, pageId?: string): Promise<void> {
   if (value.item !== 'comment' || value.verb !== 'add' || !value.comment_id || !value.from) {
+    return;
+  }
+
+  // Bỏ qua comment của chính Fanpage/Admin (mục 5.3): tránh bot tự phản hồi chính mình
+  // hoặc chốt nhầm hotline của Page thành lead khách.
+  if (pageId && value.from.id === pageId) {
     return;
   }
 
@@ -526,7 +541,7 @@ async function handleFeedChange(value: FeedCommentValue): Promise<void> {
     const mappedPsid = await getMappedPsid(commenterId);
 
     if (mappedPsid) {
-      await handleMappedCommentTurn(mappedPsid, commentText, customerName);
+      await handleMappedCommentTurn(mappedPsid, commentId, commentText, customerName);
       return;
     }
 
@@ -551,6 +566,8 @@ async function handleFeedChange(value: FeedCommentValue): Promise<void> {
 // ---------------------------------------------------------------------------
 
 interface WebhookEntry {
+  id?: string;
+  time?: number;
   messaging?: MessagingEvent[];
   changes?: { field: string; value: FeedCommentValue }[];
 }
@@ -572,6 +589,8 @@ export async function handleWebhookEvent(req: Request, res: Response): Promise<v
     if (!body || body.object !== 'page') return;
 
     for (const entry of body.entry ?? []) {
+      const pageId = entry.id;
+
       for (const event of entry.messaging ?? []) {
         try {
           if (!event.message && !event.postback) continue;
@@ -582,19 +601,11 @@ export async function handleWebhookEvent(req: Request, res: Response): Promise<v
         }
       }
 
-      // DEBUG TẠM THỜI: ghi lại nguyên trạng mọi "changes" nhận được (bất kể field gì) để chẩn đoán
-      // vì sao sự kiện comment không tới được handleFeedChange — xoá sau khi xác định xong nguyên nhân.
-      if (entry.changes && entry.changes.length > 0) {
-        await logError('DEBUG_rawFeedChanges', new Error('debug - not a real error'), {
-          changesCount: entry.changes.length,
-          changes: entry.changes,
-        });
-      }
-
       for (const change of entry.changes ?? []) {
         if (change.field !== 'feed') continue;
+        if (pageId && change.value?.from?.id === pageId) continue;
         try {
-          await handleFeedChange(change.value);
+          await handleFeedChange(change.value, pageId);
         } catch (err) {
           await logError('handleFeedChange_top', err, { change });
         }
@@ -605,4 +616,4 @@ export async function handleWebhookEvent(req: Request, res: Response): Promise<v
   }
 }
 
-export { handleFirstOpen };
+export { handleFirstOpen, handleFeedChange };
