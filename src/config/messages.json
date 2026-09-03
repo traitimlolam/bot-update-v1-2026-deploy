@@ -7,7 +7,7 @@
   "M6_SHORT": "Anh/chị kiểm tra lại số điện thoại giúp em, nó đang thiếu số ạ.",
   "M6_LONG": "Anh/chị kiểm tra lại số điện thoại giúp em, nó đang thừa số ạ.",
   "M6_INVALID": "Anh/chị kiểm tra giúp em số điện thoại đã chuẩn chưa ạ, em thấy nó chưa đúng định dạng.",
-  "M7": "Dạ, em đã có số điện thoại của anh/chị và giao đến cho nhân viên phụ trách, anh/chị chờ một chút em báo nhân viên liên hệ lại ngay với anh chị đây ạ.",
+  "M7": "Dạ, em đã có số điện thoại của anh/chị và chuyển đến cho nhân viên phụ trách, anh/chị chờ một chút em báo nhân viên liên hệ lại ngay với anh chị đây ạ.",
   "buttons": [
     { "label": "Ở đâu?", "payload": "BTN_LOCATION" },
     { "label": "Có sổ đỏ không?", "payload": "BTN_LEGAL" },
