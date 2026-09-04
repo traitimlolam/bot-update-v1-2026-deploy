@@ -150,12 +150,33 @@ async function ensureSheetExists(
 const MAX_TRACKED_ROWS = 1000;
 
 /**
- * Tìm dòng trống thật sự tiếp theo, dựa trên cột A (dòng chưa có Ngày = chưa từng ghi lead).
+ * Thuật toán tìm số thứ tự dòng trống tiếp theo (1-indexed) dựa trên CỘT B (Số điện thoại):
+ * Điền lần lượt từ dòng 2 trở xuống, hễ gặp dòng nào có Cột B trống thì chọn dòng đó để ghi lead.
+ * Tuyệt đối không so sánh hay phụ thuộc vào Cột A (Ngày) — tránh tình trạng các dòng khuyết ngày
+ * ở Cột A bị hiểu lầm là dòng trống rồi ghi đè lên lead có sẵn.
+ *
+ * Hàm thuần, nhận danh sách giá trị cột B từ dòng 2 trở xuống, trả về số dòng thực tế trên Sheet.
+ */
+export function findNextEmptyRowByColumnB(columnBValues: (string | null | undefined)[]): number {
+  for (let i = 0; i < columnBValues.length; i++) {
+    const val = columnBValues[i];
+    if (!val || String(val).trim() === '') {
+      return i + 2;
+    }
+  }
+  return columnBValues.length + 2;
+}
+
+/**
+ * Tìm dòng trống thật sự tiếp theo, dựa trên CỘT B (SĐT trống = chưa từng ghi lead).
  * KHÔNG dùng `values.append` để tự tìm dòng: Sheets API xác định "hết bảng" dựa trên toàn bộ
  * hàng có dữ liệu ở BẤT KỲ cột nào (kể cả cột F đã pre-fill sẵn theo mục 9), không giới hạn theo
  * phạm vi cột truyền vào — nên nếu dùng append, lead thật sẽ luôn bị đẩy xuống sau các dòng demo
- * có sẵn giá trị F, không bao giờ dùng lại được các ô F đã pre-fill từ dòng 2. Tự dò dòng trống
- * theo cột A rồi ghi trực tiếp (`values.update`) mới tận dụng đúng các dòng đã pre-fill sẵn cột F.
+ * có sẵn giá trị F, không bao giờ dùng lại được các ô F đã pre-fill từ dòng 2.
+ *
+ * Tự dò dòng trống theo CỘT B (SĐT) rồi ghi trực tiếp (`values.update`):
+ * - Điền lần lượt từng dòng từ dòng 2 trở xuống khi Cột B trống.
+ * - Tuyệt đối không so sánh hay phụ thuộc vào Cột A.
  */
 async function findNextEmptyRow(
   sheets: sheets_v4.Sheets,
@@ -164,13 +185,11 @@ async function findNextEmptyRow(
 ): Promise<number> {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `'${sheetTitle}'!A2:A${MAX_TRACKED_ROWS}`,
+    range: `'${sheetTitle}'!B2:B${MAX_TRACKED_ROWS}`,
   });
   const rows = res.data.values ?? [];
-  for (let i = 0; i < rows.length; i++) {
-    if (!rows[i]?.[0]) return i + 2;
-  }
-  return rows.length + 2;
+  const columnBValues = rows.map((row) => row?.[0]);
+  return findNextEmptyRowByColumnB(columnBValues);
 }
 
 /** Đọc danh sách dropdown hiện tại của cột F tại 1 dòng cụ thể (data validation ONE_OF_LIST). */
@@ -262,7 +281,7 @@ async function findLastValidAssignmentAcrossTabs(
 
 /**
  * Ghi 1 lead vào dòng trống tiếp theo của đúng tab tháng tương ứng (mục 8, 8b, R5).
- * Tự dò dòng trống theo cột A (`findNextEmptyRow`) rồi ghi trực tiếp cột A-C (Ngày, SĐT, Tên khách)
+ * Tự dò dòng trống theo CỘT B (`findNextEmptyRow`) rồi ghi trực tiếp cột A-C (Ngày, SĐT, Tên khách)
  * bằng `values.update` — KHÔNG dùng `values.append` (xem lý do ở `findNextEmptyRow`). Ghi thêm cột E
  * (Nguồn khách — "Tin nhắn"/"Cmt" theo `lead.source`, mục 8) bằng 1 lệnh `values.update` TÁCH RIÊNG
  * khỏi cột A-C để không đụng cột D xen giữa. Tuyệt đối KHÔNG đụng cột D, G, H của dòng mới. Sau đó
@@ -424,7 +443,7 @@ async function findLeadRowLocationByPhoneWithRetry(
 
 /**
  * Ghi `rowValues` (đúng 8 giá trị cột A-H) vào dòng trống tiếp theo của tab "Hỏi lại" (dò dòng trống
- * theo cột A, tái sử dụng đúng `findNextEmptyRow` — bỏ qua dòng đã có dữ liệu). Dùng chung cho cả
+ * theo CỘT B, tái sử dụng đúng `findNextEmptyRow` — bỏ qua dòng đã có dữ liệu). Dùng chung cho cả
  * `copyLeadToFollowUpSheet` (copy nguyên trạng) lẫn `updateLeadPhoneAndCopyToFollowUpSheet` (copy
  * sau khi đã sửa số điện thoại) — tránh cài trùng logic dò-dòng-trống-rồi-ghi ở 2 nơi.
  *
