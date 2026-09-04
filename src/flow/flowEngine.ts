@@ -144,11 +144,16 @@ export function processInput(current: ConversationRecord, input: FlowInput): Flo
     };
   }
 
-  // Không có chuỗi số ứng viên nào: NEW = hỏi lần đầu, IN_PROGRESS = "hỏi lại" (mục 5.2/6) —
-  // cả 2 trường hợp đều gửi lại đúng M1 → M2 → M3, không giới hạn số lần lặp cho tới khi có số hợp lệ.
+  // Không có chuỗi số ứng viên nào:
+  // - NEW: Khách nhắn lần đầu -> gửi trọn bộ M1 → M2 → M3, chuyển state thành IN_PROGRESS.
+  // - IN_PROGRESS: Đã nhắn cho khách 1 lần rồi (từ chat hoặc từ comment), khi khách nhắn thêm dòng thứ 2
+  //   trở đi hoặc khách comment nhắn lại -> chỉ gửi thêm dòng M3, không gửi lại toàn bộ M1 M2 M3 nữa.
+  const messagesToSend: MessageCode[] =
+    current.state === 'IN_PROGRESS' ? ['M3'] : LOCATION_OR_PRICE_SEQUENCE;
+
   return {
     record: { ...current, state: 'IN_PROGRESS' },
-    messagesToSend: LOCATION_OR_PRICE_SEQUENCE,
+    messagesToSend,
     leadPhone: null,
     correctedPhone: null,
     trackFollowUp: false,

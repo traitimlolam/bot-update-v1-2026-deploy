@@ -564,6 +564,17 @@ async function handleFirstCommentWithoutPhone(
     return;
   }
 
+  if (existing && existing.state === 'IN_PROGRESS') {
+    // Khách đã IN_PROGRESS từ trước (đã từng nhận M1-M3 qua tin nhắn): M1 vừa gửi để lấy PSID, chỉ gửi thêm M3
+    try {
+      await delay(MIN_DELAY_BETWEEN_MESSAGES_MS);
+      await sendMessageSequence({ comment_id: commentId }, ['M3'], true, customerName);
+    } catch (err) {
+      await logError('handleFeedChange_sendM3', err, { commentId, commenterId, resolvedPsid });
+    }
+    return;
+  }
+
   try {
     await delay(MIN_DELAY_BETWEEN_MESSAGES_MS);
     // Tiếp tục dùng { comment_id } thay vì { id: resolvedPsid } (mục 5.3): Facebook chỉ cho phép gửi
