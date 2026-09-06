@@ -17,7 +17,8 @@
     "express": "^4.19.2",
     "dotenv": "^16.4.5",
     "firebase-admin": "^12.6.0",
-    "googleapis": "^144.0.0"
+    "googleapis": "^144.0.0",
+    "@google/genai": "^2.21.0"
   },
   "devDependencies": {
     "typescript": "^5.6.3",

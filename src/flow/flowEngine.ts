@@ -15,6 +15,14 @@ export function newConversation(): ConversationRecord {
 
 export type MessageCode = 'M1' | 'M2' | 'M3' | 'M4' | 'M5' | 'M6_SHORT' | 'M6_LONG' | 'M6_INVALID' | 'M7';
 
+/**
+ * Tín hiệu "chỗ này cần AI trả lời tự do" (mục 4.2) — KHÔNG phải khoá trong `messages.json`.
+ * flowEngine chỉ đặt giá trị này vào `messagesToSend`, không tự gọi Gemini (vẫn là hàm thuần, không
+ * gọi API bên ngoài — mục 3). Chỉ lớp gọi ngoài (`webhook/facebook.ts`) mới hiểu mã này và gọi sang
+ * `ai/geminiService.generateAiReply`, thay vì tra `messages.json` như các mã khác.
+ */
+export type OutgoingMessage = MessageCode | 'AI_REPLY';
+
 export type FlowInput =
   | { type: 'BUTTON'; payload: 'BTN_LOCATION' | 'BTN_LEGAL' | 'BTN_PRICE' }
   | { type: 'TEXT'; text: string }
@@ -23,7 +31,7 @@ export type FlowInput =
 
 export interface FlowResult {
   record: ConversationRecord;
-  messagesToSend: MessageCode[];
+  messagesToSend: OutgoingMessage[];
   /** Số điện thoại hợp lệ vừa được nhận diện trong lượt này — trigger ghi Sheet + round-robin ở lớp ngoài. */
   leadPhone: string | null;
   /**
@@ -144,12 +152,13 @@ export function processInput(current: ConversationRecord, input: FlowInput): Flo
     };
   }
 
-  // Không có chuỗi số ứng viên nào:
-  // - NEW: Khách nhắn lần đầu -> gửi trọn bộ M1 → M2 → M3, chuyển state thành IN_PROGRESS.
+  // Không có chuỗi số ứng viên nào (mục 4.2):
+  // - NEW: Khách nhắn lần đầu -> gửi M1, để AI trả lời đúng câu hỏi khách vừa hỏi (dựa trên
+  //   knowledgeBase.ts), rồi gửi M3 xin số zalo. Chuyển state thành IN_PROGRESS.
   // - IN_PROGRESS: Đã nhắn cho khách 1 lần rồi (từ chat hoặc từ comment), khi khách nhắn thêm dòng thứ 2
-  //   trở đi hoặc khách comment nhắn lại -> chỉ gửi thêm dòng M3, không gửi lại toàn bộ M1 M2 M3 nữa.
-  const messagesToSend: MessageCode[] =
-    current.state === 'IN_PROGRESS' ? ['M3'] : LOCATION_OR_PRICE_SEQUENCE;
+  //   trở đi hoặc khách comment nhắn lại -> để AI trả lời câu hỏi mới rồi gửi thêm M3, không gửi lại M1.
+  const messagesToSend: OutgoingMessage[] =
+    current.state === 'IN_PROGRESS' ? ['AI_REPLY', 'M3'] : ['M1', 'AI_REPLY', 'M3'];
 
   return {
     record: { ...current, state: 'IN_PROGRESS' },
