@@ -82,7 +82,7 @@ Quy tắc bắt buộc:
 - ${pronounRule}
 - Trả lời tối đa 1-3 câu, tự nhiên như người thật đang nhắn tin, không dùng gạch đầu dòng hay liệt kê.
 - LUÔN lịch sự, tôn trọng khách — dù khách hỏi cộc lốc, mặc cả gắt, hay nói chuyện suồng sã, vẫn giữ giọng điệu nhã nhặn, không suồng sã lại, không dùng từ ngữ khiếm nhã hay tỏ ra khó chịu. Khi dẫn dắt khách để lại số, luôn làm điều đó một cách lịch sự, tự nhiên nhất — tuyệt đối không tỏ ra chỉ chăm chăm lấy số của khách.
-- KHÔNG tự đề nghị xin số điện thoại/Zalo trong câu trả lời, TRỪ KHI phần "Sự kiện" bên dưới yêu cầu rõ ràng khác đi (ví dụ: nhờ khách gửi lại số điện thoại đúng định dạng) — bình thường hệ thống sẽ tự gửi riêng câu xin số ngay sau câu trả lời của bạn, bạn không cần nhắc lại.
+- Việc CÓ mời khách để lại số điện thoại/Zalo hay không, và mời như thế nào, PHẢI làm ĐÚNG theo hướng dẫn nêu trong phần "Sự kiện" ở tin nhắn cuối cùng — không tự ý thêm lời mời để lại số nếu "Sự kiện" không yêu cầu, và không được quên nếu "Sự kiện" yêu cầu bắt buộc.
 - Kỹ thuật GÂY TÒ MÒ (curiosity gap) để tăng khả năng khách để lại số: trả lời đúng trọng tâm câu hỏi nhưng KHÔNG kể hết toàn bộ chi tiết trong 1 tin nhắn — chỉ hé lộ vừa đủ để khách thấy đáng tin (dựa trên dữ kiện thật trong THÔNG TIN DỰ ÁN), rồi khéo léo gợi mở rằng còn nhiều thứ hấp dẫn hơn đang chờ nếu để lại số (hình ảnh thực tế lô đất, vị trí chính xác từng lô, bảng giá chi tiết, ưu đãi xe đưa đón miễn phí...) — cố tình chừa lại 1 khoảng trống thông tin để khách tò mò muốn biết thêm, thay vì trả lời cho khách thấy đã đủ và không cần hỏi/để lại số nữa.
 - Không lặp lại y nguyên cấu trúc câu ở mỗi lượt trả lời, tránh nghe máy móc/rập khuôn.
 - Nếu câu hỏi của khách nằm ngoài các dữ kiện có sẵn bên dưới, trả lời khéo rằng sẽ để nhân viên tư vấn trực tiếp trao đổi chi tiết hơn, không đoán mò hay bịa thông tin.
@@ -107,18 +107,30 @@ const GREETING_HINT =
   'Đây là tin đầu tiên gửi tới khách này — bắt đầu câu trả lời bằng một lời chào ngắn tự nhiên (kiểu "Dạ em chào anh/chị ạ") trước khi trả lời.';
 
 /**
+ * Mục 4.2 (cập nhật — không còn CTA cố định 'M3' do code tự thêm): AI phải tự viết luôn cả câu mời
+ * để lại số Zalo/điện thoại, GHÉP TỰ NHIÊN vào cuối câu trả lời (không phải 1 câu tách rời, càng
+ * không phải công thức lặp lại y hệt mỗi lần) — đây là mục tiêu chốt lead DUY NHẤT còn lại của hệ
+ * thống nên bắt buộc phải có, không được quên hay bỏ qua ở bất kỳ câu trả lời nào thuộc AI_TOPIC/
+ * AI_FREE_TEXT.
+ */
+const PHONE_CTA_HINT =
+  'Sau khi trả lời xong, LUÔN kết thúc bằng đúng 1 câu ngắn, lịch sự, tự nhiên (không rập khuôn, không lặp lại y hệt lời mời ở các lượt trước) mời khách để lại số Zalo/điện thoại để bên em gửi thêm hình ảnh thực tế, vị trí chính xác từng lô và bảng giá chi tiết — đây là mục tiêu bắt buộc, tuyệt đối không được bỏ qua bước này.';
+
+/**
  * Dịch 1 `ReplyIntent` (mục 4.2 mở rộng, `flow/flowEngine.ts`) + ngữ cảnh của lượt hiện tại thành
  * hướng dẫn cụ thể, ghép vào tin nhắn "user" cuối cùng gửi cho model — KHÔNG đưa vào system
- * instruction (giữ `buildSystemInstruction` thuần/arity 1, test được độc lập — mục 13).
+ * instruction (giữ `buildSystemInstruction` thuần/arity 1, test được độc lập — mục 13). Export để
+ * unit test độc lập được việc CHỈ đúng 2 intent (AI_TOPIC/AI_FREE_TEXT) mang theo `PHONE_CTA_HINT`,
+ * 3 intent còn lại tuyệt đối không (mục 13).
  */
-function describeIntent(intent: ReplyIntent, userText: string, isNewCustomer: boolean): string {
+export function describeIntent(intent: ReplyIntent, userText: string, isNewCustomer: boolean): string {
   switch (intent.kind) {
     case 'AI_TOPIC':
-      return `Sự kiện: ${TOPIC_LABEL[intent.topic]}. ${GREETING_HINT} Trả lời đúng trọng tâm câu hỏi này, dựa hoàn toàn vào THÔNG TIN DỰ ÁN bên dưới.`;
+      return `Sự kiện: ${TOPIC_LABEL[intent.topic]}. ${GREETING_HINT} Trả lời đúng trọng tâm câu hỏi này, dựa hoàn toàn vào THÔNG TIN DỰ ÁN bên dưới. ${PHONE_CTA_HINT}`;
     case 'AI_FREE_TEXT':
       return `Sự kiện: khách vừa nhắn/bình luận tự do, nguyên văn: "${userText}". ${
         isNewCustomer ? GREETING_HINT : ''
-      } Trả lời đúng trọng tâm nội dung này, dựa hoàn toàn vào THÔNG TIN DỰ ÁN bên dưới.`;
+      } Trả lời đúng trọng tâm nội dung này, dựa hoàn toàn vào THÔNG TIN DỰ ÁN bên dưới. ${PHONE_CTA_HINT}`;
     case 'AI_PHONE_CONFIRMED':
       return 'Sự kiện: khách VỪA ĐỂ LẠI SỐ ĐIỆN THOẠI hợp lệ. Viết đúng 1 câu ngắn cảm ơn và xác nhận đã nhận được số, báo nhân viên tư vấn sẽ liên hệ với khách ngay. TUYỆT ĐỐI KHÔNG hỏi lại số điện thoại/Zalo vì đã có rồi.';
     case 'AI_PHONE_INVALID':

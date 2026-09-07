@@ -153,8 +153,8 @@ function delay(ms: number): Promise<void> {
  * (mục 4.2: "trường này không bao giờ chứa số điện thoại thật của khách").
  *
  * Fallback bắt buộc (mục 4.2, AC16): nếu Gemini lỗi/timeout (đã hết retry trong `generateAiReply`)
- * hoặc trả rỗng, dùng lại nguyên văn M2 làm câu trả lời thay thế thay vì để khách không nhận được
- * tin nào, đồng thời log lỗi để theo dõi tần suất fallback.
+ * hoặc trả rỗng, dùng lại nguyên văn `aiFallbackText` làm câu trả lời thay thế thay vì để khách
+ * không nhận được tin nào, đồng thời log lỗi để theo dõi tần suất fallback.
  */
 async function resolveIntentText(
   intent: ReplyIntent,
@@ -175,7 +175,7 @@ async function resolveIntentText(
     };
   } catch (err) {
     await logError('generateAiReply', err, { intentKind: intent.kind });
-    const fallbackText = formatPersonalizedMessage(loadMessages().M2, customerName);
+    const fallbackText = formatPersonalizedMessage(loadMessages().aiFallbackText, customerName);
     return {
       text: fallbackText,
       updatedHistory: shouldPersistHistory
@@ -186,9 +186,9 @@ async function resolveIntentText(
 }
 
 /**
- * Gửi tuần tự danh sách `OutgoingMessage` ('M3' | `ReplyIntent`), mỗi tin cách nhau >=2s kèm
- * typing_on (mục 4). Trả về PSID nếu recipient ban đầu là comment_id và Facebook trả về recipient_id
- * thật.
+ * Gửi tuần tự danh sách `OutgoingMessage` (= `ReplyIntent[]`, không còn message code cố định nào),
+ * mỗi tin cách nhau >=2s kèm typing_on (mục 4). Trả về PSID nếu recipient ban đầu là comment_id và
+ * Facebook trả về recipient_id thật.
  *
  * `keepOriginalRecipient` (mặc định false, giữ hành vi cũ cho luồng BUTTON/TEXT vốn đã gọi bằng
  * { id: psid } — chuyển sang { id } sau tin đầu không ảnh hưởng gì vì đã là { id } sẵn): khi true,
@@ -198,25 +198,22 @@ async function resolveIntentText(
  * "Người này hiện không có mặt" vì người đó chưa mở cuộc trò chuyện thật — phải giữ nguyên comment_id
  * cho MỌI tin.
  *
- * `resolveIntentTextFn`: bắt buộc phải truyền khi `items` chứa bất kỳ `ReplyIntent` nào (mọi phần tử
- * không phải chuỗi literal 'M3').
+ * `resolveIntentTextFn`: bắt buộc phải truyền — mọi phần tử của `items` đều là `ReplyIntent`, cần
+ * gọi AI (có fallback) để dịch ra câu chữ thật, không còn message code cố định nào để tự tra nữa.
  */
 async function sendMessageSequence(
   recipient: Recipient,
   items: OutgoingMessage[],
-  keepOriginalRecipient = false,
-  customerName?: string | null,
-  resolveIntentTextFn?: (intent: ReplyIntent) => Promise<string>
+  keepOriginalRecipient: boolean,
+  resolveIntentTextFn: (intent: ReplyIntent) => Promise<string>
 ): Promise<string | undefined> {
-  const messages = loadMessages();
   let resolvedPsid: string | undefined;
   let currentRecipient = recipient;
 
   for (let i = 0; i < items.length; i++) {
     await sendTypingOn(currentRecipient);
     const item = items[i];
-    const text =
-      item === 'M3' ? formatPersonalizedMessage(messages.M3, customerName) : await resolveIntentTextFn!(item);
+    const text = await resolveIntentTextFn(item);
     const recipientId = await sendText(currentRecipient, text);
     if (recipientId && !resolvedPsid) {
       resolvedPsid = recipientId;
@@ -248,7 +245,7 @@ async function loadOrCreateConversation(psid: string): Promise<StoredConversatio
  * Toàn bộ hàm được khoá theo PSID (R7): Facebook có thể gửi webhook trùng (retry khi ack chậm)
  * hoặc khách bấm/nhắn liên tiếp rất nhanh, khiến 2 lượt xử lý cho CÙNG 1 khách chạy chồng lên nhau
  * — nếu không khoá, cả hai đều đọc cùng 1 state Firestore cũ, có thể cùng ghi lead 2 lần vào Sheet
- * và gửi M5 2 lần. Khoá đảm bảo các lượt của cùng 1 khách luôn chạy tuần tự.
+ * và gửi tin xác nhận đã nhận số 2 lần. Khoá đảm bảo các lượt của cùng 1 khách luôn chạy tuần tự.
  *
  * `getCustomerName` là hàm lazy — chỉ gọi (và chỉ tốn 1 lời gọi Graph API lấy first_name/last_name)
  * khi thật sự chốt được lead, tránh gọi API vô ích ở mọi tin nhắn khác.
@@ -299,13 +296,7 @@ export async function runFlowTurn(
           return text;
         };
 
-        await sendMessageSequence(
-          targetRecipient,
-          result.messagesToSend,
-          keepOriginal,
-          customerName,
-          intentResolver
-        );
+        await sendMessageSequence(targetRecipient, result.messagesToSend, keepOriginal, intentResolver);
 
         if (updatedAiHistory) {
           try {
@@ -328,7 +319,7 @@ export async function runFlowTurn(
       try {
         // Dùng lại đúng `customerName` đã lấy ở đầu hàm (mục 8) — KHÔNG gọi lại `getCustomerName()`
         // lần 2 ở đây: vừa tốn thêm 1 lời gọi Graph API vô ích, vừa có rủi ro trả về tên khác với
-        // tên đã dùng để cá nhân hoá câu trả lời AI/M3 vừa gửi cho khách trong CÙNG lượt này, khiến
+        // tên đã dùng để cá nhân hoá câu trả lời AI vừa gửi cho khách trong CÙNG lượt này, khiến
         // tên ghi trên Sheet lệch với đại từ xưng hô khách vừa nhận được.
         // Cột E (mục 8): số điện thoại đến từ tin nhắn Messenger -> "Tin nhắn"; đến từ nội dung
         // comment (FEED_COMMENT) -> "Cmt". BUTTON không bao giờ tạo leadPhone nên không cần xét.
@@ -348,7 +339,7 @@ export async function runFlowTurn(
       }
     } else if (result.trackFollowUp && current.phone) {
       // Khách đã CLOSED từ trước nhắn lại, không phải 1 lần gõ sai định dạng số (mục 6, 8c — đã gửi
-      // M7 ở bước trên). Nếu vừa gửi lại số hợp lệ KHÁC số cũ (result.correctedPhone) -> đây là 1
+      // AI_FOLLOWUP_CLOSED ở bước trên). Nếu vừa gửi lại số hợp lệ KHÁC số cũ (result.correctedPhone) -> đây là 1
       // lần SỬA số, phải sửa lại cột B trên tab tháng gốc trước khi copy — luôn ghi ngay, không qua
       // debounce vì là thông tin mới. Ngược lại (không có gì thay đổi) mới áp dụng debounce 30 phút
       // (FOLLOW_UP_DEBOUNCE_MS) trước khi copy nguyên trạng dòng lead cũ. Không tạo lead mới, không
@@ -530,7 +521,7 @@ async function saveMappedPsid(commenterId: string, psid: string): Promise<void> 
  * Đã có Private Reply trước đó cho người này (PSID đã biết) và comment mới lại chứa số điện thoại
  * hợp lệ ngay trong nội dung -> chốt lead luôn (mục 5.3, AC10) qua đúng nhánh dùng chung với tin
  * nhắn Messenger trực tiếp (`processInput`/`runFlowTurn`), tránh cài trùng logic chốt lead ở 2 nơi.
- * Nếu không có số (hoặc số không hợp lệ), `processInput` tự xử lý M1-M3/M6/hỏi-lại như mục 5.2/6.
+ * Nếu không có số (hoặc số không hợp lệ), `processInput` tự xử lý AI_FREE_TEXT/AI_PHONE_INVALID/hỏi-lại như mục 5.2/6.
  */
 async function handleMappedCommentTurn(
   psid: string,
@@ -550,8 +541,9 @@ async function handleMappedCommentTurn(
 
 /**
  * Comment đầu tiên của 1 người (chưa từng phân giải PSID) và nội dung đã có sẵn số điện thoại hợp
- * lệ -> chốt lead ngay từ comment, không gửi M1-M3 trước (mục 5.3, AC10). Facebook chỉ trả PSID sau
- * khi gửi Private Reply đầu tiên qua comment_id, nên tin đầu tiên gửi đi chính là M5 (đúng nội dung
+ * lệ -> chốt lead ngay từ comment, không gửi câu trả lời/mời để lại số nào trước (mục 5.3, AC10).
+ * Facebook chỉ trả PSID sau khi gửi Private Reply đầu tiên qua comment_id, nên tin đầu tiên gửi đi
+ * chính là câu xác nhận đã nhận số (AI_PHONE_CONFIRMED, đúng nội dung
  * cần trả lời cho 1 lead, không phải tin "chờ" để dò PSID).
  */
 async function handleFirstCommentWithValidPhone(
@@ -581,7 +573,7 @@ async function handleFirstCommentWithValidPhone(
   const existing = await getConversation(resolvedPsid);
   if (existing && existing.state === 'CLOSED') {
     // Đã chốt lead từ trước qua kênh khác (vd đã nhắn tin trực tiếp) -> không ghi lead mới (AC6).
-    // Gửi thừa 1 tin M5 thay vì M7 là rủi ro tồn dư đã biết của Private Reply API (mục 14, không
+    // Gửi thừa 1 tin xác nhận đã nhận số thay vì trấn an là rủi ro tồn dư đã biết của Private Reply API (mục 14, không
     // biết trước state trước khi gửi). Vẫn thực hiện đúng việc theo dõi "hỏi lại" như kênh nhắn tin
     // trực tiếp (mục 6, 8c): số trong comment khác số đã ghi -> sửa lại + copy; giống số cũ -> chỉ
     // copy nguyên trạng — tránh 2 kênh xử lý lệch nhau (comment vs tin nhắn) cho cùng 1 tình huống.
@@ -717,7 +709,7 @@ async function hideComment(commentId: string): Promise<void> {
 /**
  * Khoá theo commenterId (R7): người comment 2 lần liên tiếp rất nhanh (trước khi lượt đầu kịp
  * phân giải xong PSID qua Private Reply) sẽ khiến cả 2 lượt cùng thấy `getMappedPsid` trả về null
- * và cùng mở luồng M1→M2→M3 lần nữa — khách nhận trùng tin, và bản ghi PSID cuối cùng có thể lệch
+ * và cùng mở luồng trả lời lần nữa — khách nhận trùng tin, và bản ghi PSID cuối cùng có thể lệch
  * tuỳ lượt nào lưu sau. Khoá đảm bảo lượt thứ 2 luôn thấy PSID đã được lượt đầu phân giải xong.
  */
 async function handleFeedChange(value: FeedCommentValue, pageId?: string): Promise<void> {

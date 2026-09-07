@@ -6,15 +6,12 @@ export interface MessageButton {
 }
 
 export interface MessagesConfig {
-  M1: string;
-  M2: string;
-  M3: string;
-  M4: string;
-  M5: string;
-  M6_SHORT: string;
-  M6_LONG: string;
-  M6_INVALID: string;
-  M7: string;
+  /**
+   * Câu trả lời dự phòng DUY NHẤT còn lại trong hệ thống (mục 4.2, AC16) — chỉ hiện ra khi Gemini
+   * lỗi/timeout hoặc trả về rỗng (đã hết retry). Mọi câu trả lời bình thường trong hội thoại (kể cả
+   * lời mời để lại số Zalo) đều do AI tự viết, không còn kịch bản M1-M7 cố định như trước.
+   */
+  aiFallbackText: string;
   buttons: MessageButton[];
 }
 

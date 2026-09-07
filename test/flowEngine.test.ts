@@ -2,51 +2,51 @@ import { processInput, newConversation, ConversationRecord } from '../src/flow/f
 
 describe('flowEngine.processInput', () => {
   describe('quick-reply buttons (mục 5.2)', () => {
-    it('BTN_LOCATION -> AI_TOPIC(location), M3 and state becomes IN_PROGRESS (AC1)', () => {
+    it('BTN_LOCATION -> AI_TOPIC(location) and state becomes IN_PROGRESS (AC1)', () => {
       const result = processInput(newConversation(), { type: 'BUTTON', payload: 'BTN_LOCATION' });
-      expect(result.messagesToSend).toEqual([{ kind: 'AI_TOPIC', topic: 'location' }, 'M3']);
+      expect(result.messagesToSend).toEqual([{ kind: 'AI_TOPIC', topic: 'location' }]);
       expect(result.record.state).toBe('IN_PROGRESS');
     });
 
-    it('BTN_PRICE -> AI_TOPIC(price), M3 (AC1)', () => {
+    it('BTN_PRICE -> AI_TOPIC(price) (AC1)', () => {
       const result = processInput(newConversation(), { type: 'BUTTON', payload: 'BTN_PRICE' });
-      expect(result.messagesToSend).toEqual([{ kind: 'AI_TOPIC', topic: 'price' }, 'M3']);
+      expect(result.messagesToSend).toEqual([{ kind: 'AI_TOPIC', topic: 'price' }]);
     });
 
-    it('BTN_LEGAL -> AI_TOPIC(legal), M3 (AC2)', () => {
+    it('BTN_LEGAL -> AI_TOPIC(legal) (AC2)', () => {
       const result = processInput(newConversation(), { type: 'BUTTON', payload: 'BTN_LEGAL' });
-      expect(result.messagesToSend).toEqual([{ kind: 'AI_TOPIC', topic: 'legal' }, 'M3']);
+      expect(result.messagesToSend).toEqual([{ kind: 'AI_TOPIC', topic: 'legal' }]);
     });
   });
 
   describe('free text (mục 5.2, 4.2, AC3, AC9)', () => {
-    it('free text on NEW state -> AI_FREE_TEXT, M3 (AC3)', () => {
+    it('free text on NEW state -> AI_FREE_TEXT (AC3)', () => {
       const result = processInput(newConversation(), { type: 'TEXT', text: 'cho hoi gia the nao' });
-      expect(result.messagesToSend).toEqual([{ kind: 'AI_FREE_TEXT' }, 'M3']);
+      expect(result.messagesToSend).toEqual([{ kind: 'AI_FREE_TEXT' }]);
       expect(result.record.state).toBe('IN_PROGRESS');
     });
 
-    it('free text on IN_PROGRESS with no phone number (dòng thứ 2) -> AI_FREE_TEXT rồi M3 (AC9)', () => {
+    it('free text on IN_PROGRESS with no phone number (dòng thứ 2) -> AI_FREE_TEXT (AC9)', () => {
       const inProgress: ConversationRecord = { state: 'IN_PROGRESS', phone: null, assignedStaff: null };
       const result = processInput(inProgress, { type: 'TEXT', text: 'con hang khong ban' });
-      expect(result.messagesToSend).toEqual([{ kind: 'AI_FREE_TEXT' }, 'M3']);
+      expect(result.messagesToSend).toEqual([{ kind: 'AI_FREE_TEXT' }]);
       expect(result.record.state).toBe('IN_PROGRESS');
     });
 
     it('customer sends 1st message, then 2nd message, then valid phone sends AI_PHONE_CONFIRMED', () => {
-      // Dòng 1: khách nhắn lần đầu -> nhận AI_FREE_TEXT, M3
+      // Dòng 1: khách nhắn lần đầu -> nhận AI_FREE_TEXT
       const turn1 = processInput(newConversation(), { type: 'TEXT', text: 'cho em hoi dat' });
-      expect(turn1.messagesToSend).toEqual([{ kind: 'AI_FREE_TEXT' }, 'M3']);
+      expect(turn1.messagesToSend).toEqual([{ kind: 'AI_FREE_TEXT' }]);
       expect(turn1.record.state).toBe('IN_PROGRESS');
 
-      // Dòng 2: khách nhắn thêm -> vẫn nhận AI_FREE_TEXT rồi M3
+      // Dòng 2: khách nhắn thêm -> vẫn nhận AI_FREE_TEXT
       const turn2 = processInput(turn1.record, { type: 'TEXT', text: 'dat o xa nao em' });
-      expect(turn2.messagesToSend).toEqual([{ kind: 'AI_FREE_TEXT' }, 'M3']);
+      expect(turn2.messagesToSend).toEqual([{ kind: 'AI_FREE_TEXT' }]);
       expect(turn2.record.state).toBe('IN_PROGRESS');
 
-      // Dòng 3: khách nhắn thêm tiếp -> vẫn nhận AI_FREE_TEXT rồi M3
+      // Dòng 3: khách nhắn thêm tiếp -> vẫn nhận AI_FREE_TEXT
       const turn3 = processInput(turn2.record, { type: 'TEXT', text: 'co so do chua' });
-      expect(turn3.messagesToSend).toEqual([{ kind: 'AI_FREE_TEXT' }, 'M3']);
+      expect(turn3.messagesToSend).toEqual([{ kind: 'AI_FREE_TEXT' }]);
       expect(turn3.record.state).toBe('IN_PROGRESS');
 
       // Dòng 4: khách cho số điện thoại hợp lệ -> chốt lead, nhận AI_PHONE_CONFIRMED
@@ -56,11 +56,11 @@ describe('flowEngine.processInput', () => {
       expect(turn4.leadPhone).toBe('0912345678');
     });
 
-    it('repeat-ask sends AI_FREE_TEXT + M3 every time until a valid phone arrives', () => {
+    it('repeat-ask sends AI_FREE_TEXT every time until a valid phone arrives', () => {
       let record: ConversationRecord = { state: 'IN_PROGRESS', phone: null, assignedStaff: null };
       for (let i = 0; i < 3; i++) {
         const result = processInput(record, { type: 'TEXT', text: `hoi lai lan ${i}` });
-        expect(result.messagesToSend).toEqual([{ kind: 'AI_FREE_TEXT' }, 'M3']);
+        expect(result.messagesToSend).toEqual([{ kind: 'AI_FREE_TEXT' }]);
         record = result.record;
       }
     });
@@ -157,16 +157,16 @@ describe('flowEngine.processInput', () => {
   });
 
   describe('feed/comment không kèm text hoặc không có số điện thoại (mục 5.3, AC8)', () => {
-    it('first comment on NEW state -> AI_FREE_TEXT, M3', () => {
+    it('first comment on NEW state -> AI_FREE_TEXT', () => {
       const result = processInput(newConversation(), { type: 'FEED_COMMENT' });
-      expect(result.messagesToSend).toEqual([{ kind: 'AI_FREE_TEXT' }, 'M3']);
+      expect(result.messagesToSend).toEqual([{ kind: 'AI_FREE_TEXT' }]);
       expect(result.record.state).toBe('IN_PROGRESS');
     });
 
-    it('comment on IN_PROGRESS state without phone -> sends AI_FREE_TEXT then M3 (AC8/AC9)', () => {
+    it('comment on IN_PROGRESS state without phone -> sends AI_FREE_TEXT (AC8/AC9)', () => {
       const inProgress: ConversationRecord = { state: 'IN_PROGRESS', phone: null, assignedStaff: null };
       const result = processInput(inProgress, { type: 'FEED_COMMENT' });
-      expect(result.messagesToSend).toEqual([{ kind: 'AI_FREE_TEXT' }, 'M3']);
+      expect(result.messagesToSend).toEqual([{ kind: 'AI_FREE_TEXT' }]);
     });
 
     it('comment on CLOSED state -> replies AI_FOLLOWUP_CLOSED, không tạo lead mới (không còn im lặng tuyệt đối)', () => {

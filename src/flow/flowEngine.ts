@@ -16,14 +16,13 @@ export function newConversation(): ConversationRecord {
 export type ReplyTopic = 'location' | 'legal' | 'price';
 
 /**
- * Ý định trả lời (mục 4.2 mở rộng — "giao toàn quyền cho Gemini trả lời"): flowEngine không còn tra
- * message code cố định cho nội dung hội thoại — chỉ còn 'M3' (CTA xin số Zalo) là literal, vẫn do
- * code tự đảm bảo gửi, không giao cho AI, để mục tiêu chốt lead không phụ thuộc việc AI có "tự giác"
- * nhắc hay không (nguyên tắc bất biến từ đầu dự án). Toàn bộ CÂU CHỮ còn lại — kể cả các sự kiện hệ
- * thống như xác nhận đã nhận số, báo sai định dạng số điện thoại, hay đã chuyển nhân viên phụ trách —
- * đều do lớp gọi ngoài (`webhook/facebook.ts`) gọi sang `ai/geminiService.ts` để Gemini viết linh hoạt
- * theo đúng SỰ KIỆN mà code đã xác định. flowEngine chỉ mô tả Ý ĐỊNH cần trả lời (sự kiện gì vừa xảy
- * ra), không tự quyết định nội dung câu chữ và không tự gọi API (vẫn là hàm thuần — mục 3).
+ * Ý định trả lời (mục 4.2 — "giao toàn quyền cho Gemini trả lời"): flowEngine không tra message code
+ * cố định cho bất kỳ nội dung hội thoại nào nữa, kể cả câu mời để lại số Zalo — AI tự viết TOÀN BỘ
+ * câu chữ, bao gồm cả việc lịch sự xin số điện thoại/Zalo khi phù hợp (mục 4.2). Lớp gọi ngoài
+ * (`webhook/facebook.ts`) gọi sang `ai/geminiService.ts` để Gemini viết linh hoạt theo đúng SỰ KIỆN
+ * mà code đã xác định (`describeIntent` trong geminiService.ts quyết định khi nào cần xin số, khi
+ * nào tuyệt đối không). flowEngine chỉ mô tả Ý ĐỊNH cần trả lời (sự kiện gì vừa xảy ra), không tự
+ * quyết định nội dung câu chữ và không tự gọi API (vẫn là hàm thuần — mục 3).
  */
 export type ReplyIntent =
   | { kind: 'AI_TOPIC'; topic: ReplyTopic }
@@ -32,8 +31,8 @@ export type ReplyIntent =
   | { kind: 'AI_PHONE_INVALID'; errorType: PhoneErrorType }
   | { kind: 'AI_FOLLOWUP_CLOSED' };
 
-/** 'M3' là mã message CỐ ĐỊNH DUY NHẤT còn lại trong hệ thống — CTA xin số Zalo. */
-export type OutgoingMessage = 'M3' | ReplyIntent;
+/** Không còn message code cố định nào trong hệ thống — mọi tin gửi khách đều là 1 ReplyIntent. */
+export type OutgoingMessage = ReplyIntent;
 
 export type FlowInput =
   | { type: 'BUTTON'; payload: 'BTN_LOCATION' | 'BTN_LEGAL' | 'BTN_PRICE' }
@@ -116,7 +115,7 @@ export function processInput(current: ConversationRecord, input: FlowInput): Flo
   if (input.type === 'BUTTON') {
     return {
       record: { ...current, state: 'IN_PROGRESS' },
-      messagesToSend: [{ kind: 'AI_TOPIC', topic: BUTTON_TOPIC[input.payload] }, 'M3'],
+      messagesToSend: [{ kind: 'AI_TOPIC', topic: BUTTON_TOPIC[input.payload] }],
       leadPhone: null,
       correctedPhone: null,
       trackFollowUp: false,
@@ -156,12 +155,13 @@ export function processInput(current: ConversationRecord, input: FlowInput): Flo
     };
   }
 
-  // Không có chuỗi số ứng viên nào (mục 4.2): để AI trả lời đúng câu hỏi/nội dung khách vừa nhắn rồi
-  // gửi thêm M3 xin số zalo — áp dụng như nhau dù đây là lần đầu (NEW) hay nhắn thêm/hỏi lại
-  // (IN_PROGRESS), vì không còn tin chào M1 cố định để phân biệt 2 trường hợp này nữa.
+  // Không có chuỗi số ứng viên nào (mục 4.2): để AI trả lời đúng câu hỏi/nội dung khách vừa nhắn, kèm
+  // lời mời để lại số Zalo do chính AI viết (không còn M3 cố định) — áp dụng như nhau dù đây là lần
+  // đầu (NEW) hay nhắn thêm/hỏi lại (IN_PROGRESS), vì không còn tin chào M1 cố định để phân biệt 2
+  // trường hợp này nữa.
   return {
     record: { ...current, state: 'IN_PROGRESS' },
-    messagesToSend: [{ kind: 'AI_FREE_TEXT' }, 'M3'],
+    messagesToSend: [{ kind: 'AI_FREE_TEXT' }],
     leadPhone: null,
     correctedPhone: null,
     trackFollowUp: false,

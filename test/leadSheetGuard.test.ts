@@ -96,7 +96,7 @@ describe('runFlowTurn: appendLead chỉ được gọi khi số điện thoại 
 
       expect(mockedAppendLead).not.toHaveBeenCalled();
     },
-    10000 // "không phải số điện thoại" trả về M1->M2->M3 thật (2s delay/tin, không mock timer) — nới
+    10000 // "không phải số điện thoại" gọi generateAiReply thật (mock) + typing_on/2s delay — nới
     // timeout để tránh flaky khi máy chạy chậm, thay vì chỉ vừa đủ sát ngưỡng mặc định 5000ms.
   );
 
@@ -124,21 +124,22 @@ describe('runFlowTurn: appendLead chỉ được gọi khi số điện thoại 
     expect(mockedAppendLead).not.toHaveBeenCalled();
   });
 
-  it('generateAiReply lỗi -> vẫn gửi tin cho khách (fallback M2), log lỗi, không im lặng (AC16)', async () => {
+  it('generateAiReply lỗi -> vẫn gửi tin cho khách (fallback), log lỗi, không im lặng (AC16)', async () => {
     mockedGenerateAiReply.mockRejectedValueOnce(new Error('Gemini timeout'));
 
     await runFlowTurn('PSID_TEST', { type: 'TEXT', text: 'quy hoach the nao em' }, async () => 'Khách A');
 
     expect(mockedLogError).toHaveBeenCalledWith('generateAiReply', expect.any(Error), expect.anything());
 
-    // Vẫn gửi đủ 2 tin thật (fallback thay AI_REPLY, rồi M3) — không bỏ lượt, không im lặng.
+    // Vẫn gửi đúng 1 tin thật (fallback thay AI_FREE_TEXT, không còn M3 tách riêng nữa) — không bỏ
+    // lượt, không im lặng. aiFallbackText đã gộp sẵn cả câu mời để lại số zalo trong cùng 1 tin.
     const sentTexts = (global.fetch as jest.Mock).mock.calls
       .map((c) => JSON.parse(c[1].body as string))
       .filter((body) => typeof body.message?.text === 'string')
       .map((body) => body.message.text as string);
-    expect(sentTexts).toHaveLength(2);
-    expect(sentTexts[0]).toContain('Hiện tại bên em đang có nhiều lô đất giá rẻ'); // nguyên văn M2 (fallback)
-    expect(sentTexts[1]).toContain('nhắn em số zalo nhé'); // M3 vẫn được gửi bình thường (đại từ có thể đã được cá nhân hoá)
+    expect(sentTexts).toHaveLength(1);
+    expect(sentTexts[0]).toContain('Hiện tại bên em đang có nhiều lô đất giá rẻ');
+    expect(sentTexts[0]).toContain('nhắn em số zalo nhé');
 
     expect(mockedUpdateAiHistory).toHaveBeenCalledTimes(1);
     const [, historyEntries] = mockedUpdateAiHistory.mock.calls[0];
@@ -223,7 +224,7 @@ describe('runFlowTurn: appendLead chỉ được gọi khi số điện thoại 
     expect(mockedUpdateLeadPhoneAndCopyToFollowUpSheet).not.toHaveBeenCalled();
   });
 
-  it('conversation đã CLOSED, khách nhắn lại -> gửi M7 và copy dòng lead cũ (theo SĐT đã ghi) sang tab "Hỏi lại" (mục 6 phiên bản mới)', async () => {
+  it('conversation đã CLOSED, khách nhắn lại -> gửi tin trấn an (AI_FOLLOWUP_CLOSED) và copy dòng lead cũ (theo SĐT đã ghi) sang tab "Hỏi lại" (mục 6 phiên bản mới)', async () => {
     mockedGetConversation.mockResolvedValue({
       state: 'CLOSED',
       phone: '0987654321',

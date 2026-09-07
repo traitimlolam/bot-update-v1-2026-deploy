@@ -3,7 +3,7 @@
  * việc lắp ráp system prompt: luôn nhúng đúng knowledgeBase.ts, không nhận/không rò rỉ số điện
  * thoại khách vào prompt (hàm không có tham số nào cho phép truyền số điện thoại).
  */
-import { buildSystemInstruction } from '../src/ai/geminiService';
+import { buildSystemInstruction, describeIntent } from '../src/ai/geminiService';
 import { AREA_KNOWLEDGE_BASE } from '../src/config/knowledgeBase';
 
 describe('geminiService.buildSystemInstruction (mục 4.2)', () => {
@@ -17,9 +17,9 @@ describe('geminiService.buildSystemInstruction (mục 4.2)', () => {
     expect(instruction).toMatch(/không.*bịa/i);
   });
 
-  it('không tự đề nghị xin số điện thoại/zalo (CTA do code tự thêm, không giao cho AI)', () => {
+  it('việc xin số điện thoại/Zalo phải làm đúng theo hướng dẫn "Sự kiện" ở tin nhắn cuối, không tự ý (mục 4.2)', () => {
     const instruction = buildSystemInstruction('Trần Thị B');
-    expect(instruction).toMatch(/không.*xin số điện thoại/i);
+    expect(instruction).toMatch(/sự kiện.*yêu cầu/i);
   });
 
   it('khách nam -> hướng dẫn gọi "anh"', () => {
@@ -66,5 +66,49 @@ describe('geminiService.buildSystemInstruction (mục 4.2)', () => {
     const instruction = buildSystemInstruction(null);
     expect(instruction).toMatch(/tò mò/i);
     expect(instruction).toMatch(/không phải là giải đáp cho khách thật đầy đủ/i);
+  });
+});
+
+/**
+ * Mục 4.2 (cập nhật — không còn CTA 'M3' cố định do code tự thêm): CHÍNH AI phải tự viết câu mời để
+ * lại số Zalo/điện thoại. `describeIntent` là nơi DUY NHẤT quyết định lượt nào bắt buộc phải có lời
+ * mời đó (AI_TOPIC/AI_FREE_TEXT) và lượt nào tuyệt đối không được có (3 intent còn lại) — sai ở đây
+ * đồng nghĩa với việc bot có thể quên xin số (mất mục tiêu chốt lead) hoặc hỏi lại số dù đã có/đã
+ * đóng hội thoại (gây khó chịu cho khách).
+ */
+describe('geminiService.describeIntent (mục 4.2)', () => {
+  it('AI_TOPIC -> bắt buộc phải có hướng dẫn mời để lại số Zalo/điện thoại', () => {
+    const instruction = describeIntent({ kind: 'AI_TOPIC', topic: 'price' }, '', false);
+    expect(instruction).toMatch(/mời khách để lại số zalo\/điện thoại/i);
+  });
+
+  it('AI_FREE_TEXT -> bắt buộc phải có hướng dẫn mời để lại số Zalo/điện thoại', () => {
+    const instruction = describeIntent({ kind: 'AI_FREE_TEXT' }, 'dat o dau vay em', false);
+    expect(instruction).toMatch(/mời khách để lại số zalo\/điện thoại/i);
+  });
+
+  it('AI_PHONE_CONFIRMED -> tuyệt đối KHÔNG được hỏi lại số (đã có số hợp lệ rồi)', () => {
+    const instruction = describeIntent({ kind: 'AI_PHONE_CONFIRMED' }, '', false);
+    expect(instruction).toMatch(/không hỏi lại số điện thoại/i);
+    expect(instruction).not.toMatch(/mời khách để lại số zalo\/điện thoại/i);
+  });
+
+  it('AI_FOLLOWUP_CLOSED -> tuyệt đối KHÔNG được hỏi thêm số (đã CLOSED, đã bàn giao nhân viên)', () => {
+    const instruction = describeIntent({ kind: 'AI_FOLLOWUP_CLOSED' }, '', false);
+    expect(instruction).toMatch(/không hỏi thêm số điện thoại/i);
+    expect(instruction).not.toMatch(/mời khách để lại số zalo\/điện thoại/i);
+  });
+
+  it('AI_PHONE_INVALID -> chỉ yêu cầu gửi lại đúng số, không phải lời mời để lại số kiểu mới', () => {
+    const instruction = describeIntent({ kind: 'AI_PHONE_INVALID', errorType: 'missing' }, '', false);
+    expect(instruction).toMatch(/gửi lại đúng số điện thoại/i);
+    expect(instruction).not.toMatch(/mời khách để lại số zalo\/điện thoại/i);
+  });
+
+  it('AI_FREE_TEXT trên khách mới (isNewCustomer=true) -> có hướng dẫn chào mở đầu; khách cũ thì không', () => {
+    const newCustomerInstruction = describeIntent({ kind: 'AI_FREE_TEXT' }, 'hoi gia', true);
+    const returningCustomerInstruction = describeIntent({ kind: 'AI_FREE_TEXT' }, 'hoi gia', false);
+    expect(newCustomerInstruction).toMatch(/lời chào ngắn/i);
+    expect(returningCustomerInstruction).not.toMatch(/lời chào ngắn/i);
   });
 });
