@@ -47,13 +47,13 @@ export function buildSystemInstruction(customerName: string | null): string {
 
   let pronounRule: string;
   if (gender === 'MALE') {
-    pronounRule = 'Xưng "em", gọi khách là "anh".';
+    pronounRule = `Bộ lọc giới tính xác định khách là NAM: Bắt buộc xưng "em", gọi khách là "anh"${callName ? ` hoặc "anh ${callName}"` : ''}. Tuyệt đối KHÔNG dùng "anh/chị".`;
   } else if (gender === 'FEMALE') {
-    pronounRule = 'Xưng "em", gọi khách là "chị".';
+    pronounRule = `Bộ lọc giới tính xác định khách là NỮ: Bắt buộc xưng "em", gọi khách là "chị"${callName ? ` hoặc "chị ${callName}"` : ''}. Tuyệt đối KHÔNG dùng "anh/chị".`;
   } else if (callName) {
     pronounRule = `Chưa xác định được khách là nam hay nữ — xưng "em", gọi thẳng tên khách là "${callName}" thay vì dùng "anh/chị". Nếu trong tin nhắn khách tự xưng là "anh" hoặc "chị", hãy linh hoạt xưng hô đúng theo khách.`;
   } else {
-    pronounRule = 'Chưa có tên khách — xưng "em", gọi khách là "anh/chị". Nếu trong tin nhắn khách tự xưng là "anh" hoặc "chị", hãy linh hoạt xưng hô đúng theo khách.';
+    pronounRule = 'Chưa có tên khách hoặc chưa xác định được giới tính — xưng "em", gọi khách là "anh/chị". Nếu trong tin nhắn khách tự xưng là "anh" hoặc "chị", hãy linh hoạt xưng hô đúng theo khách.';
   }
 
   return `Bạn là chuyên viên tư vấn bất động sản của Fanpage, đang trực tiếp trả lời tin nhắn/comment của khách hàng.
@@ -104,7 +104,7 @@ const PHONE_ERROR_LABEL: Record<PhoneErrorType, string> = {
 };
 
 const GREETING_HINT =
-  'Đây là tin đầu tiên gửi tới khách này — bắt đầu câu trả lời bằng một lời chào ngắn tự nhiên (kiểu "Dạ em chào anh/chị ạ") trước khi trả lời.';
+  'Đây là tin đầu tiên gửi tới khách này — bắt đầu câu trả lời bằng một lời chào ngắn tự nhiên theo đúng giới tính quy định (nam thì chào anh, nữ thì chào chị, không xác định được mới dùng anh/chị) trước khi trả lời.';
 
 /**
  * Mục 4.2 (cập nhật — không còn CTA cố định 'M3' do code tự thêm): AI phải tự viết luôn cả câu mời
@@ -126,7 +126,7 @@ const PHONE_CTA_HINT =
 export function describeIntent(intent: ReplyIntent, userText: string, isNewCustomer: boolean): string {
   switch (intent.kind) {
     case 'AI_GREETING':
-      return 'Sự kiện: khách vừa mở cửa sổ chat lần đầu, CHƯA nói/hỏi gì cả. Viết đúng 1 câu chào ngắn, thân thiện, tự nhiên (kiểu "Dạ em chào anh/chị ạ") — không cần hỏi han hay giới thiệu gì thêm vì bên dưới tin này đã có sẵn 3 nút bấm chủ đề cho khách chọn. TUYỆT ĐỐI KHÔNG hỏi số điện thoại/Zalo ở bước này, còn quá sớm.';
+      return 'Sự kiện: khách vừa mở cửa sổ chat lần đầu, CHƯA nói/hỏi gì cả. Viết đúng 1 câu chào ngắn, thân thiện, tự nhiên theo đúng giới tính quy định ở trên (nếu là anh thì chào anh, nếu là chị thì chào chị, chỉ dùng anh/chị khi không xác định được giới tính) — không cần hỏi han hay giới thiệu gì thêm vì bên dưới tin này đã có sẵn 3 nút bấm chủ đề cho khách chọn. TUYỆT ĐỐI KHÔNG hỏi số điện thoại/Zalo ở bước này, còn quá sớm.';
     case 'AI_TOPIC':
       // Nút bấm chỉ có thể xuất hiện SAU khi khách đã nhận tin chào mở màn kèm 3 nút (mục 5.1,
       // handleFirstOpen gửi AI_GREETING riêng trước đó) -> AI_TOPIC không bao giờ cần tự chào lại,
@@ -199,7 +199,7 @@ export async function generateAiReply(params: GenerateAiReplyParams): Promise<st
     }
 
     const data = (await response.json()) as ChatCompletionResponse;
-    const text = (data?.choices?.[0]?.message?.content ?? '')
+    let text = (data?.choices?.[0]?.message?.content ?? '')
       .trim()
       .replace(/\*/g, '')
       .replace(/#/g, '')
@@ -208,6 +208,16 @@ export async function generateAiReply(params: GenerateAiReplyParams): Promise<st
     if (!text) {
       throw new Error('AI Router trả về nội dung rỗng');
     }
+
+    // Bảo đảm triệt để đại từ xưng hô theo bộ lọc giới tính:
+    // Nếu bộ lọc đã xác định rõ NAM hoặc NỮ, thay thế mọi từ "anh/chị" còn sót lại thành "anh" hoặc "chị"
+    const { gender } = analyzeVietnameseName(customerName, userText);
+    if (gender === 'MALE') {
+      text = text.replace(/anh\/chị/g, 'anh').replace(/Anh\/chị/g, 'Anh').replace(/anh\/Chị/g, 'anh').replace(/Anh\/Chị/g, 'Anh');
+    } else if (gender === 'FEMALE') {
+      text = text.replace(/anh\/chị/g, 'chị').replace(/Anh\/chị/g, 'Chị').replace(/anh\/Chị/g, 'chị').replace(/Anh\/Chị/g, 'Chị');
+    }
+
     return text;
   });
 }
