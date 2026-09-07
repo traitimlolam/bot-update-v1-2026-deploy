@@ -34,7 +34,14 @@ import { withRetry } from '../util/retry';
 
 const GRAPH_API_VERSION = 'v19.0';
 const GRAPH_BASE_URL = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
-const MIN_DELAY_BETWEEN_MESSAGES_MS = process.env.NODE_ENV === 'test' ? 0 : 2000;
+/**
+ * Thời gian chờ ngẫu nhiên giữa 2 tin nhắn/bong bóng (2 đến 3 giây) để giống người nhắn thật.
+ * Trong môi trường test: 0ms để test chạy tức thì.
+ */
+export function getRandomMessageDelayMs(): number {
+  if (process.env.NODE_ENV === 'test') return 0;
+  return 2000 + Math.floor(Math.random() * 1001);
+}
 
 // Debounce ghi tab "Hỏi lại" (mục 8c, mở rộng theo yêu cầu chủ dự án): khách CLOSED nhắn qua lại
 // liên tục trong thời gian ngắn mà KHÔNG có gì mới (không có số, hoặc số giống hệt số cũ) chỉ tạo
@@ -251,12 +258,12 @@ async function sendMessageSequence(
         }
       }
       if (b < bubbles.length - 1) {
-        await delay(MIN_DELAY_BETWEEN_MESSAGES_MS);
+        await delay(getRandomMessageDelayMs());
       }
     }
 
     if (i < items.length - 1) {
-      await delay(MIN_DELAY_BETWEEN_MESSAGES_MS);
+      await delay(getRandomMessageDelayMs());
     }
   }
   return resolvedPsid;
