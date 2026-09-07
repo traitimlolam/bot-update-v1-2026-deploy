@@ -150,17 +150,23 @@ describe('reminderService: Rà soát & gửi tin nhắn nhắc lúc 20h hàng ng
 
   describe('runDailyReminderSweep', () => {
     it('chỉ gửi tin cho khách chưa cho SĐT trong ngày, bỏ qua khách CLOSED hoặc đã gửi', async () => {
-      const { todayStr } = getVietnamDateRange();
+      const { todayStr, windowStart, windowEnd } = getVietnamDateRange();
+      const midWindow = { toDate: () => new Date((windowStart.getTime() + windowEnd.getTime()) / 2) };
 
       mockedGetConversation.mockImplementation(async (psid: string) => {
         if (psid === 'PSID_MALE') {
-          return { state: 'IN_PROGRESS', phone: null, customerName: 'Nguyễn Trọng Hiếu' };
+          return {
+            state: 'IN_PROGRESS',
+            phone: null,
+            customerName: 'Nguyễn Trọng Hiếu',
+            lastFlowSentAt: midWindow,
+          };
         }
         if (psid === 'PSID_FEMALE') {
-          return { state: 'NEW', phone: null, customerName: 'Trần Hương' };
+          return { state: 'NEW', phone: null, customerName: 'Trần Hương', lastFlowSentAt: midWindow };
         }
         if (psid === 'PSID_CLOSED') {
-          return { state: 'CLOSED', phone: '0987654321', customerName: 'Đình Thiệu' };
+          return { state: 'CLOSED', phone: '0987654321', customerName: 'Đình Thiệu', lastFlowSentAt: midWindow };
         }
         if (psid === 'PSID_ALREADY_SENT') {
           return {
@@ -168,6 +174,7 @@ describe('reminderService: Rà soát & gửi tin nhắn nhắc lúc 20h hàng ng
             phone: null,
             customerName: 'Bay Nguyen',
             lastReminderSentDate: todayStr,
+            lastFlowSentAt: midWindow,
           };
         }
         return null;
@@ -211,6 +218,9 @@ describe('reminderService: Rà soát & gửi tin nhắn nhắc lúc 20h hàng ng
     });
 
     it('khách chỉ mới bình luận (có lastCommentId) -> gửi tin nhắc qua {comment_id}, không dùng {id} (mục 5.3/5.4)', async () => {
+      const { windowStart, windowEnd } = getVietnamDateRange();
+      const midWindow = { toDate: () => new Date((windowStart.getTime() + windowEnd.getTime()) / 2) };
+
       mockedGetConversation.mockImplementation(async (psid: string) => {
         if (psid === 'PSID_MALE') {
           return {
@@ -218,11 +228,18 @@ describe('reminderService: Rà soát & gửi tin nhắn nhắc lúc 20h hàng ng
             phone: null,
             customerName: 'Nguyễn Trọng Hiếu',
             lastCommentId: 'CMT_LATEST_789',
+            lastFlowSentAt: midWindow,
           };
         }
         if (psid === 'PSID_FEMALE') {
           // Đã từng nhắn tin trực tiếp -> lastCommentId đã bị xoá về null, vẫn gửi qua {id} bình thường.
-          return { state: 'NEW', phone: null, customerName: 'Trần Hương', lastCommentId: null };
+          return {
+            state: 'NEW',
+            phone: null,
+            customerName: 'Trần Hương',
+            lastCommentId: null,
+            lastFlowSentAt: midWindow,
+          };
         }
         return null;
       });
@@ -239,6 +256,41 @@ describe('reminderService: Rà soát & gửi tin nhắn nhắc lúc 20h hàng ng
         { id: 'PSID_FEMALE' },
         'Thứ 7 này em có xe đưa đón xem đất miễn phí, chị có đi được không ạ?'
       );
+    });
+
+    it('KHÔNG gửi lại cho khách mà updated_time (Graph API) bị chính tin nhắc hôm trước làm mới, dù lastFlowSentAt thật đã ngoài khung giờ (chống lặp vô hạn, mục 5.4)', async () => {
+      const { windowStart, windowEnd } = getVietnamDateRange();
+      // updated_time của conversation (mock fetch trong beforeEach) đang nằm giữa khung giờ hôm nay
+      // cho PSID_MALE/PSID_FEMALE -> nhưng lastFlowSentAt THẬT trong Firestore của PSID_MALE lại là
+      // 2 ngày trước (mô phỏng đúng ca thật: khách đã được nhắc hôm qua, tin nhắc đó tự làm mới
+      // updated_time, khách không hề nhắn gì thêm) -> phải bị bỏ qua, không gửi tiếp.
+      const staleTime = { toDate: () => new Date(windowStart.getTime() - 2 * 24 * 3600000) };
+      const midWindow = { toDate: () => new Date((windowStart.getTime() + windowEnd.getTime()) / 2) };
+
+      mockedGetConversation.mockImplementation(async (psid: string) => {
+        if (psid === 'PSID_MALE') {
+          return {
+            state: 'IN_PROGRESS',
+            phone: null,
+            customerName: 'Nguyễn Trọng Hiếu',
+            lastReminderSentDate: '2026-01-01',
+            lastFlowSentAt: staleTime,
+          };
+        }
+        if (psid === 'PSID_FEMALE') {
+          return { state: 'NEW', phone: null, customerName: 'Trần Hương', lastFlowSentAt: midWindow };
+        }
+        return null;
+      });
+
+      const result = await runDailyReminderSweep();
+
+      expect(mockedSendText).not.toHaveBeenCalledWith({ id: 'PSID_MALE' }, expect.any(String));
+      expect(mockedSendText).toHaveBeenCalledWith(
+        { id: 'PSID_FEMALE' },
+        'Thứ 7 này em có xe đưa đón xem đất miễn phí, chị có đi được không ạ?'
+      );
+      expect(result.sentCount).toBe(1);
     });
 
     it('dùng CHUNG 1 khoá theo ngày dù chạy force hay không, để 2 sweep không bao giờ chạy song song', async () => {

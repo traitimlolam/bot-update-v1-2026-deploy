@@ -274,6 +274,19 @@ export async function runDailyReminderSweep(options?: {
           continue;
         }
 
+        // Xác nhận lại bằng `lastFlowSentAt` THẬT trong Firestore (chỉ `saveConversation` ghi field
+        // này — tức chỉ khi khách thật sự kích hoạt 1 lượt flow, KHÔNG BAO GIỜ bị `updateConversationReminder`
+        // của chính tin nhắc chạm vào) thay vì tin hoàn toàn vào `updated_time` của `fetchPageConversations`
+        // phía trên: `updated_time` bị chính TIN NHẮC hôm trước của bot làm mới, khiến khách đã im lặng
+        // nhiều ngày (không hề nhắn gì mới) vẫn bị coi là "có hoạt động trong khung giờ" và lọt lại vào
+        // danh sách ứng viên hôm sau -> gửi tiếp thì Facebook từ chối vì đã quá 24h kể từ tin nhắn thật
+        // cuối cùng của khách (lỗi 2018278) -> lặp lại vô thời hạn mỗi ngày nếu không chặn ở đây.
+        const lastFlowSentAt = current?.lastFlowSentAt?.toDate();
+        if (!lastFlowSentAt || lastFlowSentAt < windowStart || lastFlowSentAt > windowEnd) {
+          skippedCount++;
+          continue;
+        }
+
         const customerName = candidate.customerName ?? current?.customerName ?? null;
         const text = formatPersonalizedMessage(LAND_TOUR_REMINDER_TEMPLATE, customerName);
 
