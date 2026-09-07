@@ -114,7 +114,7 @@ const GREETING_HINT =
  * AI_FREE_TEXT.
  */
 const PHONE_CTA_HINT =
-  'Sau khi trả lời xong, LUÔN kết thúc bằng đúng 1 câu ngắn, lịch sự, tự nhiên (không rập khuôn, không lặp lại y hệt lời mời ở các lượt trước) mời khách để lại số Zalo/điện thoại để bên em gửi thêm hình ảnh thực tế, vị trí chính xác từng lô và bảng giá chi tiết — đây là mục tiêu bắt buộc, tuyệt đối không được bỏ qua bước này.';
+  'Quy tắc xin số: Khi câu hỏi phù hợp để gửi thêm tài liệu (bảng giá chi tiết, vị trí chính xác, sơ đồ phân lô, hình ảnh thực tế), hãy khéo léo mời khách để lại số Zalo/điện thoại để bên em gửi qua. TUY NHIÊN, nếu trong các câu chat gần nhất bot đã từng mời xin số rồi hoặc khách đang hỏi dở chi tiết khác mà chưa muốn cho số, TUYỆT ĐỐI KHÔNG lặp lại câu xin số dồn dập ở lượt này — chỉ tập trung trả lời đúng trọng tâm và gợi mở bước tiếp theo một cách nhã nhặn.';
 
 /**
  * Dịch 1 `ReplyIntent` (mục 4.2 mở rộng, `flow/flowEngine.ts`) + ngữ cảnh của lượt hiện tại thành

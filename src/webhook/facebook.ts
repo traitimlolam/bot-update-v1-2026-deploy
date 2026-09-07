@@ -200,6 +200,25 @@ async function resolveIntentText(
  * `resolveIntentTextFn`: bắt buộc phải truyền — mọi phần tử của `items` đều là `ReplyIntent`, cần
  * gọi AI (có fallback) để dịch ra câu chữ thật, không còn message code cố định nào để tự tra nữa.
  */
+export function splitMessageIntoBubbles(text: string): string[] {
+  if (!text) return [];
+  const clean = text.trim();
+  if (clean.includes('\n\n')) {
+    return clean
+      .split(/\n{2,}/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  const lines = clean
+    .split(/\n+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (lines.length > 1 && lines.length <= 4) {
+    return lines;
+  }
+  return [clean];
+}
+
 async function sendMessageSequence(
   recipient: Recipient,
   items: OutgoingMessage[],
@@ -210,16 +229,24 @@ async function sendMessageSequence(
   let currentRecipient = recipient;
 
   for (let i = 0; i < items.length; i++) {
-    await sendTypingOn(currentRecipient);
     const item = items[i];
     const text = await resolveIntentTextFn(item);
-    const recipientId = await sendText(currentRecipient, text);
-    if (recipientId && !resolvedPsid) {
-      resolvedPsid = recipientId;
-      if (!keepOriginalRecipient) {
-        currentRecipient = { id: recipientId };
+    const bubbles = splitMessageIntoBubbles(text);
+
+    for (let b = 0; b < bubbles.length; b++) {
+      await sendTypingOn(currentRecipient);
+      const recipientId = await sendText(currentRecipient, bubbles[b]);
+      if (recipientId && !resolvedPsid) {
+        resolvedPsid = recipientId;
+        if (!keepOriginalRecipient) {
+          currentRecipient = { id: recipientId };
+        }
+      }
+      if (b < bubbles.length - 1) {
+        await delay(MIN_DELAY_BETWEEN_MESSAGES_MS);
       }
     }
+
     if (i < items.length - 1) {
       await delay(MIN_DELAY_BETWEEN_MESSAGES_MS);
     }
