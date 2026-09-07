@@ -214,6 +214,14 @@ export interface SweepResult {
  * - Khóa từng khách: `psid:${psid}` chống xung đột khi khách đang chat cùng lúc.
  * - Deduplication: Ghi nhận `lastReminderSentDate = todayStr` để tuyệt đối không gửi lặp cho 1 khách.
  */
+// Sweep có thể lặp gửi tin cho rất nhiều khách, mỗi khách cách nhau 1s (throttle chống rate-limit
+// Facebook Send API bên dưới) + độ trễ mạng thật — tổng thời gian chạy thực tế có thể vượt xa TTL
+// mặc định của `withLock` (90s, vốn chỉ tính cho 1 lượt xử lý ngắn). Nếu khoá hết hạn giữa chừng
+// trong khi sweep vẫn đang chạy thật, 1 container Cloud Run khác (hoặc chính scheduler này ở lượt
+// kiểm tra 60s tiếp theo) có thể chiếm khoá và chạy sweep thứ 2 song song, gửi trùng tin nhắc cho
+// cùng 1 khách. Đặt TTL đủ dài (30 phút) để bao trọn cả sweep quy mô lớn.
+const DAILY_SWEEP_LOCK_TTL_MS = 30 * 60 * 1000;
+
 export async function runDailyReminderSweep(options?: {
   force?: boolean;
   dryRun?: boolean;
@@ -223,7 +231,9 @@ export async function runDailyReminderSweep(options?: {
   // (bên dưới), tuyệt đối không được bỏ qua khoá chống 2 sweep chạy chồng nhau (mục 5.4).
   const lockKey = `dailyReminderSweep:${todayStr}`;
 
-  return withLock(lockKey, async () => {
+  return withLock(
+    lockKey,
+    async () => {
     // 1. Thu thập danh sách khách hàng tương tác từ 20h01 hôm trước đến 20h00 hôm nay từ Graph API và Firestore
     const [pageCandidates, firestoreCandidates] = await Promise.all([
       fetchPageConversations(windowStart, windowEnd),
@@ -302,7 +312,9 @@ export async function runDailyReminderSweep(options?: {
       skippedCount,
       errors,
     };
-  });
+    },
+    DAILY_SWEEP_LOCK_TTL_MS
+  );
 }
 
 let schedulerTimer: NodeJS.Timeout | null = null;

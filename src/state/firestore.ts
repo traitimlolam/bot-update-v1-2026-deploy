@@ -155,10 +155,17 @@ function sanitizeLockKey(key: string): string {
  * Khoá phân tán đơn giản dựa trên transaction atomic của Firestore (document `locks/{key}`,
  * field `expiresAtMs`). Dùng để serialize các thao tác theo cùng 1 khoá (vd cùng 1 PSID, cùng
  * 1 tab Sheet) — tránh 2 lệnh xử lý đồng thời ("lệnh chồng chéo") đọc cùng 1 state cũ rồi ghi đè
- * lên nhau, gây mất lead hoặc trùng round-robin. Khoá tự hết hạn sau `LOCK_TTL_MS` nếu tiến trình
+ * lên nhau, gây mất lead hoặc trùng round-robin. Khoá tự hết hạn sau `ttlMs` nếu tiến trình
  * giữ khoá bị crash giữa chừng, tránh deadlock vĩnh viễn.
+ *
+ * `ttlMs` (mặc định `LOCK_TTL_MS`, đủ cho 1 lượt `runFlowTurn`/1 lệnh Sheets API): CHO PHÉP ghi đè
+ * khi biết trước công việc bên trong `fn` có thể chạy lâu hơn nhiều — vd `dailyReminderSweep`
+ * (mục 5.4) lặp gửi tin cho hàng chục/hàng trăm khách, mỗi khách cách nhau 1s, tổng thời gian có
+ * thể vượt xa `LOCK_TTL_MS` mặc định. Nếu khoá hết hạn TRONG LÚC `fn` vẫn đang chạy thật, một tiến
+ * trình khác có thể chiếm được khoá và chạy sweep thứ 2 song song với sweep đầu chưa xong, dẫn tới
+ * gửi trùng tin nhắc cho cùng 1 khách — luôn truyền `ttlMs` đủ lớn cho các tác vụ dài hơi như vậy.
  */
-export async function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+export async function withLock<T>(key: string, fn: () => Promise<T>, ttlMs: number = LOCK_TTL_MS): Promise<T> {
   const db = getDb();
   const lockRef = db.collection(LOCKS_COLLECTION).doc(sanitizeLockKey(key));
   const deadline = Date.now() + LOCK_ACQUIRE_TIMEOUT_MS;
@@ -171,7 +178,7 @@ export async function withLock<T>(key: string, fn: () => Promise<T>): Promise<T>
       if (snap.exists && data?.expiresAtMs && data.expiresAtMs > now) {
         return false;
       }
-      tx.set(lockRef, { expiresAtMs: now + LOCK_TTL_MS });
+      tx.set(lockRef, { expiresAtMs: now + ttlMs });
       return true;
     });
 

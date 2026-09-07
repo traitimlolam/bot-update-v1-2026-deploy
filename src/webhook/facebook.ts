@@ -321,7 +321,10 @@ export async function runFlowTurn(
 
     if (result.leadPhone) {
       try {
-        const customerName = await getCustomerName();
+        // Dùng lại đúng `customerName` đã lấy ở đầu hàm (mục 8) — KHÔNG gọi lại `getCustomerName()`
+        // lần 2 ở đây: vừa tốn thêm 1 lời gọi Graph API vô ích, vừa có rủi ro trả về tên khác với
+        // tên đã dùng để cá nhân hoá câu trả lời AI/M3 vừa gửi cho khách trong CÙNG lượt này, khiến
+        // tên ghi trên Sheet lệch với đại từ xưng hô khách vừa nhận được.
         // Cột E (mục 8): số điện thoại đến từ tin nhắn Messenger -> "Tin nhắn"; đến từ nội dung
         // comment (FEED_COMMENT) -> "Cmt". BUTTON không bao giờ tạo leadPhone nên không cần xét.
         const source: LeadSource = input.type === 'FEED_COMMENT' ? 'Cmt' : 'Tin nhắn';
