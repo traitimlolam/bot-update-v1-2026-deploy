@@ -2,6 +2,7 @@ import {
   analyzeVietnameseName,
   formatPersonalizedMessage,
   removeVietnameseTones,
+  detectGenderFromText,
 } from '../src/utils/genderDetector';
 
 describe('genderDetector', () => {
@@ -10,6 +11,33 @@ describe('genderDetector', () => {
       expect(removeVietnameseTones('Nguyễn Trọng Hiếu')).toBe('Nguyen Trong Hieu');
       expect(removeVietnameseTones('Đình Thiệu')).toBe('Dinh Thieu');
       expect(removeVietnameseTones('Trần Thu Thuỷ')).toBe('Tran Thu Thuy');
+    });
+  });
+
+  describe('detectGenderFromText', () => {
+    it('bắt chính xác đại từ tự xưng Nam (Anh)', () => {
+      expect(detectGenderFromText('Anh muốn hỏi lô 100m2 giá bao nhiêu?')).toBe('MALE');
+      expect(detectGenderFromText('Báo giá anh nhé em')).toBe('MALE');
+      expect(detectGenderFromText('cho anh xin thông tin')).toBe('MALE');
+      expect(detectGenderFromText('anh dang can tim dat ven do')).toBe('MALE');
+      expect(detectGenderFromText('Zalo anh là 0912345678')).toBe('MALE');
+      expect(detectGenderFromText('Anh đây em')).toBe('MALE');
+    });
+
+    it('bắt chính xác đại từ tự xưng Nữ (Chị)', () => {
+      expect(detectGenderFromText('Chị muốn xem sổ đỏ lô này')).toBe('FEMALE');
+      expect(detectGenderFromText('Gửi chị bảng giá chi tiết nhé')).toBe('FEMALE');
+      expect(detectGenderFromText('cho chi hoi gia bao nhieu')).toBe('FEMALE');
+      expect(detectGenderFromText('Chi can xem phap ly')).toBe('FEMALE');
+      expect(detectGenderFromText('Sđt chị là 0987654321')).toBe('FEMALE');
+      expect(detectGenderFromText('Chị nhé em')).toBe('FEMALE');
+    });
+
+    it('không có từ tự xưng rõ ràng -> UNKNOWN', () => {
+      expect(detectGenderFromText('Dự án ở đâu vậy em?')).toBe('UNKNOWN');
+      expect(detectGenderFromText('Bao nhieu tien mot lo?')).toBe('UNKNOWN');
+      expect(detectGenderFromText(null)).toBe('UNKNOWN');
+      expect(detectGenderFromText('')).toBe('UNKNOWN');
     });
   });
 
@@ -79,6 +107,21 @@ describe('genderDetector', () => {
       });
     });
 
+    it('kết hợp ngữ cảnh tin nhắn (contextText) giải quyết tên trung tính hoặc không rõ', () => {
+      expect(analyzeVietnameseName('Bình', 'Anh muốn xem sổ đỏ')).toEqual({
+        gender: 'MALE',
+        callName: 'Bình',
+      });
+      expect(analyzeVietnameseName('Bay Nguyen', 'Gửi chị bảng giá nhé')).toEqual({
+        gender: 'FEMALE',
+        callName: 'Bay',
+      });
+      expect(analyzeVietnameseName(null, 'Anh hỏi giá')).toEqual({
+        gender: 'MALE',
+        callName: '',
+      });
+    });
+
     it('trường hợp null, undefined hoặc rỗng -> UNKNOWN', () => {
       expect(analyzeVietnameseName(null)).toEqual({ gender: 'UNKNOWN', callName: '' });
       expect(analyzeVietnameseName(undefined)).toEqual({ gender: 'UNKNOWN', callName: '' });
@@ -133,6 +176,12 @@ describe('genderDetector', () => {
       expect(formatPersonalizedMessage(template3, 'Bình')).toBe(
         'Bình nhắn em số zalo nhé. Em gửi vị trí Bình tham khảo ạ.'
       );
+    });
+
+    it('tên trung tính nhưng có contextText tự xưng -> xưng hô chính xác', () => {
+      const template = 'Em chào anh/chị.';
+      expect(formatPersonalizedMessage(template, 'Bình', 'Anh hỏi giá')).toBe('Em chào anh.');
+      expect(formatPersonalizedMessage(template, 'Bay Nguyen', 'Chị cần xem')).toBe('Em chào chị.');
     });
 
     it('giữ nguyên template ban đầu khi không có tên khách (null / rỗng)', () => {

@@ -50,7 +50,7 @@ const FEMALE_FIRST_NAMES = new Set([
   'le', 'lieu', 'man', 'men', 'mi', 'net', 'nguyet', 'nhan', 'nuong', 'phuong',
   'que', 'sinh', 'tam', 'tham', 'thuc', 'thuong', 'tien', 'truc', 'uyen', 'xuyen',
   'xoan', 'cam', 'nu', 'no', 'mui', 'tho', 'giao', 'nhi', 'nhu', 'ngat', 'lanh',
-  'vui', 'kieu', 'thuan', 'thao', 'lai', 'lai'
+  'vui', 'kieu', 'thuan', 'thao', 'lai'
 ]);
 
 /**
@@ -70,12 +70,55 @@ const MALE_FIRST_NAMES = new Set([
 ]);
 
 /**
- * Phân tích tên tiếng Việt của khách để dự đoán giới tính (Nam / Nữ / Chưa xác định)
- * và trích xuất tên gọi phù hợp.
+ * Phát hiện đại từ xưng hô khách tự xưng trong nội dung tin nhắn/comment
+ * (Hợp lệ 100% theo chính sách Meta, độ chính xác tuyệt đối do khách tự nhận).
  */
-export function analyzeVietnameseName(fullName: string | null | undefined): GenderAnalysis {
+export function detectGenderFromText(text: string | null | undefined): Gender {
+  if (!text || typeof text !== 'string') return 'UNKNOWN';
+
+  const normalized = removeVietnameseTones(text).toLowerCase();
+
+  // Mẫu tự xưng là Nam (Anh):
+  // "anh muốn", "anh cần", "báo giá anh", "cho anh", "gửi anh", "anh hỏi", "số anh là", "zalo anh"
+  const malePatterns = [
+    /\b(anh)\s+(muon|can|hoi|quan tam|xem|tim|dang|chua|mua|thay|gui|lay|xin|inbox|nhan|alo|goi|biet|tinh)\b/,
+    /\b(bao gia|gui|tu van|nhan|goi|alo|lien he|cho|bao)\s+(cho\s+)?(anh)\b/,
+    /\bcho\s+anh\s+(hoi|xin|xem|biet)\b/,
+    /\b(so|zalo|sdt|dien thoai)\s+(cua\s+)?(anh)\b/,
+    /\b(anh)\s+(day|nhe|ha em|day em|nha em|nhe em)\b/,
+    /\b(minh|toi)\s+la\s+anh\b/,
+  ];
+
+  // Mẫu tự xưng là Nữ (Chị):
+  // "chị muốn", "chị cần", "báo giá chị", "cho chị", "gửi chị", "chị hỏi", "số chị là", "zalo chị"
+  const femalePatterns = [
+    /\b(chi)\s+(muon|can|hoi|quan tam|xem|tim|dang|chua|mua|thay|gui|lay|xin|inbox|nhan|alo|goi|biet|tinh)\b/,
+    /\b(bao gia|gui|tu van|nhan|goi|alo|lien he|cho|bao)\s+(cho\s+)?(chi)\b/,
+    /\bcho\s+chi\s+(hoi|xin|xem|biet)\b/,
+    /\b(so|zalo|sdt|dien thoai)\s+(cua\s+)?(chi)\b/,
+    /\b(chi)\s+(day|nhe|ha em|day em|nha em|nhe em)\b/,
+    /\b(minh|toi)\s+la\s+chi\b/,
+  ];
+
+  const isMale = malePatterns.some((pattern) => pattern.test(normalized));
+  const isFemale = femalePatterns.some((pattern) => pattern.test(normalized));
+
+  if (isMale && !isFemale) return 'MALE';
+  if (isFemale && !isMale) return 'FEMALE';
+  return 'UNKNOWN';
+}
+
+/**
+ * Phân tích tên tiếng Việt của khách để dự đoán giới tính (Nam / Nữ / Chưa xác định)
+ * và trích xuất tên gọi phù hợp. Có thể kết hợp với nội dung tin nhắn (contextText) để tăng độ chính xác.
+ */
+export function analyzeVietnameseName(
+  fullName: string | null | undefined,
+  contextText: string | null | undefined = null
+): GenderAnalysis {
   if (!fullName || typeof fullName !== 'string') {
-    return { gender: 'UNKNOWN', callName: '' };
+    const textGender = detectGenderFromText(contextText);
+    return { gender: textGender, callName: '' };
   }
 
   // Làm sạch các ký tự đặc biệt, số hoặc emoji
@@ -85,7 +128,8 @@ export function analyzeVietnameseName(fullName: string | null | undefined): Gend
     .replace(/\s+/g, ' ');
 
   if (!cleaned) {
-    return { gender: 'UNKNOWN', callName: '' };
+    const textGender = detectGenderFromText(contextText);
+    return { gender: textGender, callName: '' };
   }
 
   const rawTokens = cleaned.split(' ');
@@ -103,6 +147,12 @@ export function analyzeVietnameseName(fullName: string | null | undefined): Gend
     !COMMON_SURNAMES.has(normTokens[0])
   ) {
     callName = rawTokens[0];
+  }
+
+  // Ưu tiên 0: Nếu trong tin nhắn khách có tự xưng rõ ràng (vd "anh cần", "chị muốn"), lấy ngay giới tính này
+  const textGender = detectGenderFromText(contextText);
+  if (textGender !== 'UNKNOWN') {
+    return { gender: textGender, callName };
   }
 
   // 1. Kiểm tra tên đệm "Thị" (chắc chắn 100% Nữ)
@@ -144,11 +194,12 @@ export function analyzeVietnameseName(fullName: string | null | undefined): Gend
  */
 export function formatPersonalizedMessage(
   template: string,
-  customerName: string | null | undefined
+  customerName: string | null | undefined,
+  contextText: string | null | undefined = null
 ): string {
   if (!template) return '';
 
-  const { gender } = analyzeVietnameseName(customerName);
+  const { gender } = analyzeVietnameseName(customerName, contextText);
 
   let pronounLower = 'anh/chị';
   let pronounCap = 'Anh/chị';

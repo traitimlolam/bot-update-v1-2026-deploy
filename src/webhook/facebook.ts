@@ -174,7 +174,7 @@ async function resolveIntentText(
     };
   } catch (err) {
     await logError('generateAiReply', err, { intentKind: intent.kind });
-    const fallbackText = formatPersonalizedMessage(loadMessages().aiFallbackText, customerName);
+    const fallbackText = formatPersonalizedMessage(loadMessages().aiFallbackText, customerName, userText);
     return {
       text: fallbackText,
       updatedHistory: shouldPersistHistory
