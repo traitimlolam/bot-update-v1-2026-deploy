@@ -50,7 +50,7 @@ import {
   updateLeadPhoneAndCopyToFollowUpSheet,
 } from '../src/services/sheetsService';
 import { generateAiReply } from '../src/ai/geminiService';
-import { runFlowTurn, handleFeedChange } from '../src/webhook/facebook';
+import { runFlowTurn, handleFeedChange, handleFirstOpen } from '../src/webhook/facebook';
 
 const mockedGetConversation = getConversation as jest.Mock;
 const mockedSaveConversation = saveConversation as jest.Mock;
@@ -99,6 +99,46 @@ describe('runFlowTurn: appendLead chỉ được gọi khi số điện thoại 
     10000 // "không phải số điện thoại" gọi generateAiReply thật (mock) + typing_on/2s delay — nới
     // timeout để tránh flaky khi máy chạy chậm, thay vì chỉ vừa đủ sát ngưỡng mặc định 5000ms.
   );
+
+  it('free text không có SĐT trên state NEW (khách nhắn thẳng câu hỏi, chưa từng nhận tin nào) -> tách thành 2 tin: AI_GREETING rồi AI_FREE_TEXT (cả 2 isNewCustomer=false), gửi đúng 2 tin, chỉ aiHistory của AI_FREE_TEXT được lưu', async () => {
+    mockedGetConversation.mockResolvedValue(null); // null -> newConversation() -> state NEW
+    mockedGenerateAiReply
+      .mockResolvedValueOnce('Dạ em chào anh ạ!')
+      .mockResolvedValueOnce('Đất bên em ở Lạc Sơn, Hoà Bình anh nhé. Anh để lại số Zalo em gửi thêm ạ!');
+
+    await runFlowTurn('PSID_NEW_TEXT', { type: 'TEXT', text: 'dat o dau vay em' }, async () => 'Khách A');
+
+    expect(mockedGenerateAiReply).toHaveBeenCalledTimes(2);
+    expect(mockedGenerateAiReply).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ intent: { kind: 'AI_GREETING' }, isNewCustomer: false })
+    );
+    expect(mockedGenerateAiReply).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        intent: { kind: 'AI_FREE_TEXT' },
+        userText: 'dat o dau vay em',
+        isNewCustomer: false,
+      })
+    );
+
+    const sentTexts = (global.fetch as jest.Mock).mock.calls
+      .map((c) => {
+        try {
+          return JSON.parse(c[1].body as string);
+        } catch {
+          return null;
+        }
+      })
+      .filter((body) => body && typeof body.message?.text === 'string')
+      .map((body) => body.message.text as string);
+    expect(sentTexts).toHaveLength(2);
+
+    expect(mockedUpdateAiHistory).toHaveBeenCalledWith('PSID_NEW_TEXT', [
+      { role: 'user', text: 'dat o dau vay em' },
+      { role: 'model', text: 'Đất bên em ở Lạc Sơn, Hoà Bình anh nhé. Anh để lại số Zalo em gửi thêm ạ!' },
+    ]);
+  });
 
   it('free text không có SĐT trên state IN_PROGRESS -> gọi generateAiReply đúng 1 lần và lưu lại aiHistory (mục 4.2)', async () => {
     await runFlowTurn('PSID_TEST', { type: 'TEXT', text: 'duong o to may met vay em' }, async () => 'Khách A');
@@ -367,5 +407,117 @@ describe('runFlowTurn: appendLead chỉ được gọi khi số điện thoại 
     );
     expect(hideCall).toBeDefined();
     expect(hideCall[1]?.method).toBe('POST');
+  });
+
+  describe('handleFirstOpen (mục 5.1) — chào mở đầu do AI viết, không còn text cố định', () => {
+    it('khách chưa từng có hội thoại -> gọi generateAiReply với intent AI_GREETING, gửi kèm 3 nút bấm, lưu state NEW', async () => {
+      mockedGetConversation.mockResolvedValue(null);
+      mockedGenerateAiReply.mockResolvedValue('Dạ em chào anh ạ!');
+
+      await handleFirstOpen('PSID_NEW');
+
+      expect(mockedGenerateAiReply).toHaveBeenCalledWith(
+        expect.objectContaining({ intent: { kind: 'AI_GREETING' } })
+      );
+
+      const sendCall = (global.fetch as jest.Mock).mock.calls.find((c) => {
+        try {
+          const body = JSON.parse(c[1].body as string);
+          return Array.isArray(body.message?.quick_replies);
+        } catch {
+          return false;
+        }
+      });
+      expect(sendCall).toBeDefined();
+      const body = JSON.parse(sendCall[1].body as string);
+      expect(body.message.text).toBe('Dạ em chào anh ạ!');
+      expect(body.message.quick_replies.map((q: { payload: string }) => q.payload)).toEqual(
+        expect.arrayContaining(['BTN_LOCATION', 'BTN_LEGAL', 'BTN_PRICE'])
+      );
+
+      expect(mockedSaveConversation).toHaveBeenCalledWith('PSID_NEW', expect.objectContaining({ state: 'NEW' }));
+    });
+
+    it('khách đã CLOSED từ trước -> KHÔNG gửi lại menu 3 nút, không gọi AI (AC6)', async () => {
+      mockedGetConversation.mockResolvedValue({ state: 'CLOSED', phone: '0912345678', assignedStaff: 'A' });
+
+      await handleFirstOpen('PSID_CLOSED');
+
+      expect(mockedGenerateAiReply).not.toHaveBeenCalled();
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('handleFeedChange: comment đầu tiên không có số điện thoại (mục 5.3) — AI đọc comment, gửi 2 tin TÁCH RIÊNG (AI_GREETING rồi mới AI_FREE_TEXT)', () => {
+    it('commenter chưa từng map PSID, chưa có hội thoại -> gọi generateAiReply với AI_GREETING rồi AI_FREE_TEXT (cả 2 isNewCustomer=false vì chào đã tách riêng), gửi đúng 2 tin, lưu state IN_PROGRESS + aiHistory', async () => {
+      mockedGetConversation.mockResolvedValue(null);
+      mockedGenerateAiReply
+        .mockResolvedValueOnce('Dạ em chào chị ạ!')
+        .mockResolvedValueOnce('Bên em có đất khu Lạc Sơn giá tốt lắm ạ. Chị để lại số Zalo em gửi ảnh nhé!');
+
+      await handleFeedChange({
+        item: 'comment',
+        verb: 'add',
+        comment_id: 'CMT_NOPHONE_1',
+        from: { id: 'USER_NOPHONE_1', name: 'Trần Thị B' },
+        message: 'Đất ở đâu vậy shop',
+      });
+
+      expect(mockedGenerateAiReply).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          intent: { kind: 'AI_GREETING' },
+          isNewCustomer: false,
+        })
+      );
+      expect(mockedGenerateAiReply).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          intent: { kind: 'AI_FREE_TEXT' },
+          userText: 'Đất ở đâu vậy shop',
+          isNewCustomer: false,
+        })
+      );
+
+      const sentTexts = (global.fetch as jest.Mock).mock.calls
+        .map((c) => {
+          try {
+            return JSON.parse(c[1].body as string);
+          } catch {
+            return null;
+          }
+        })
+        .filter((body) => body && typeof body.message?.text === 'string')
+        .map((body) => body.message.text as string);
+      expect(sentTexts).toHaveLength(2);
+
+      expect(mockedSaveConversation).toHaveBeenCalledWith(
+        'RESOLVED_PSID',
+        expect.objectContaining({ state: 'IN_PROGRESS' })
+      );
+      expect(mockedUpdateAiHistory).toHaveBeenCalledWith('RESOLVED_PSID', [
+        { role: 'user', text: 'Đất ở đâu vậy shop' },
+        { role: 'model', text: expect.any(String) },
+      ]);
+    });
+
+    it('commenter hoá ra đã CLOSED từ trước (qua kênh khác) -> không ghi đè state/aiHistory, chỉ theo dõi "hỏi lại"', async () => {
+      mockedGetConversation.mockResolvedValue({ state: 'CLOSED', phone: '0987654321', assignedStaff: 'A' });
+      mockedGenerateAiReply.mockResolvedValue('Dạ em chào anh ạ! Bên em còn nhiều lô lắm ạ.');
+
+      await handleFeedChange({
+        item: 'comment',
+        verb: 'add',
+        comment_id: 'CMT_NOPHONE_2',
+        from: { id: 'USER_NOPHONE_2', name: 'Lê Văn C' },
+        message: 'Con nhieu dat khong shop',
+      });
+
+      expect(mockedGenerateAiReply).toHaveBeenCalledTimes(2);
+      expect(mockedSaveConversation).not.toHaveBeenCalled();
+      expect(mockedUpdateAiHistory).not.toHaveBeenCalled();
+      expect(mockedCopyLeadToFollowUpSheet).toHaveBeenCalledWith('0987654321');
+      expect(mockedTouchFollowUpTracked).toHaveBeenCalledWith('RESOLVED_PSID');
+    });
   });
 });

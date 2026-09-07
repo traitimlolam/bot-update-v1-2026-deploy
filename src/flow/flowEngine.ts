@@ -25,11 +25,19 @@ export type ReplyTopic = 'location' | 'legal' | 'price';
  * quyết định nội dung câu chữ và không tự gọi API (vẫn là hàm thuần — mục 3).
  */
 export type ReplyIntent =
+  | { kind: 'AI_GREETING' }
   | { kind: 'AI_TOPIC'; topic: ReplyTopic }
   | { kind: 'AI_FREE_TEXT' }
   | { kind: 'AI_PHONE_CONFIRMED' }
   | { kind: 'AI_PHONE_INVALID'; errorType: PhoneErrorType }
   | { kind: 'AI_FOLLOWUP_CLOSED' };
+
+/**
+ * `AI_GREETING` KHÔNG bao giờ do `processInput` trả về — chỉ dùng ở lớp gọi ngoài
+ * (`webhook/facebook.ts`) cho đúng 1 tình huống: khách vừa mở cửa sổ chat lần đầu (mục 5.1), TRƯỚC
+ * khi flowEngine chạy. Khai báo ở đây (không phải riêng trong geminiService.ts) để dùng chung đúng 1
+ * định nghĩa `ReplyIntent` cho toàn hệ thống.
+ */
 
 /** Không còn message code cố định nào trong hệ thống — mọi tin gửi khách đều là 1 ReplyIntent. */
 export type OutgoingMessage = ReplyIntent;

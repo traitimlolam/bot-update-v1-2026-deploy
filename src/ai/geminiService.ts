@@ -9,15 +9,22 @@ import { PhoneErrorType } from '../flow/phoneValidator';
  * án đã duyệt phương án này (mục 4.2/14 CLAUDE.md): xoay vòng tài khoản Google Pro cá nhân, không bị
  * giới hạn 20 lượt/ngày của Gemini Developer API free tier. Có thể ghi đè qua biến môi trường
  * `AI_ROUTER_URL`/`AI_MODEL_NAME` nếu router đổi địa chỉ hoặc đổi tên model.
+ *
+ * LƯU Ý VẬN HÀNH QUAN TRỌNG (mục 14): địa chỉ mặc định `100.93.163.100` là 1 IP nội bộ trong mạng
+ * riêng Tailscale — CHỈ máy nào đã cài & đăng nhập Tailscale (vd máy Mac chạy bot local) mới với tới
+ * được. Khi deploy lên Google Cloud Run, container KHÔNG nằm trong mạng Tailscale này nên KHÔNG thể
+ * kết nối tới địa chỉ mặc định — mọi lời gọi AI sẽ timeout/lỗi và rơi vào `aiFallbackText` (mục 4.2).
+ * Bắt buộc phải set biến môi trường `AI_ROUTER_URL` trên Cloud Run trỏ tới 1 địa chỉ CÔNG KHAI thật
+ * sự với tới được (Cloudflare Tunnel/domain public trỏ về cổng 20128 của router, hoặc Tailscale
+ * Funnel) trước khi go-live trên Cloud Run — xem thêm `AI_ROUTER_API_KEY` bên dưới nếu endpoint đó
+ * cần xác thực.
  */
 const ROUTER_BASE_URL = process.env.AI_ROUTER_URL || 'http://100.93.163.100:20128/v1';
 const MODEL_NAME = process.env.AI_MODEL_NAME || 'ag/gemini-3.8-flash-high';
-
 /**
- * Tuỳ chọn — chỉ cần set khi endpoint router (vd IP public của VM qua firewall mở riêng) có đặt lớp
- * xác thực API key để tránh bị người lạ gọi trộm. Khi có giá trị, gửi kèm header
- * `Authorization: Bearer <key>`; khi để trống (mặc định, đúng với router qua Tailscale nội bộ),
- * không gửi header này.
+ * Tuỳ chọn — chỉ cần set khi endpoint public (Cloudflare Tunnel...) của router có đặt lớp xác thực
+ * riêng để tránh bị người lạ gọi trộm. Khi có giá trị, gửi kèm header `Authorization: Bearer <key>`;
+ * khi để trống (mặc định, đúng với router qua Tailscale nội bộ hiện tại), không gửi header này.
  */
 const ROUTER_API_KEY = process.env.AI_ROUTER_API_KEY;
 
@@ -26,36 +33,6 @@ export type AiHistoryRole = 'user' | 'model';
 export interface AiHistoryTurn {
   role: AiHistoryRole;
   text: string;
-}
-
-/**
- * Lời chào mở đầu, KHÔNG qua AI (tiết kiệm chi phí — dùng cho lúc mở màn hội thoại/probe PSID qua
- * comment, nội dung không phụ thuộc câu hỏi cụ thể của khách nên không cần gọi model).
- */
-export function buildNaturalGreeting(customerName: string | null): string {
-  const { gender, callName } = analyzeVietnameseName(customerName);
-  if (gender === 'MALE') {
-    return 'Dạ em chào anh ạ! Em có thể hỗ trợ anh tìm hiểu thông tin lô đất nào bên em hôm nay ạ?';
-  }
-  if (gender === 'FEMALE') {
-    return 'Dạ em chào chị ạ! Em có thể hỗ trợ chị tìm hiểu thông tin lô đất nào bên em hôm nay ạ?';
-  }
-  if (callName) {
-    return `Dạ em chào ${callName} ạ! Em có thể hỗ trợ mình tìm hiểu thông tin lô đất nào bên em hôm nay ạ?`;
-  }
-  return 'Dạ em chào anh/chị ạ! Em có thể hỗ trợ mình tìm hiểu thông tin lô đất nào bên em hôm nay ạ?';
-}
-
-/**
- * Lời chào ngắn dùng làm tin PROBE đầu tiên gửi qua comment_id để buộc Facebook trả về PSID thật
- * của người bình luận lần đầu (mục 5.3) — cũng không qua AI vì nội dung không phụ thuộc ngữ cảnh.
- */
-export function buildCommentGreeting(customerName: string | null): string {
-  const { gender, callName } = analyzeVietnameseName(customerName);
-  if (gender === 'MALE') return 'Dạ em chào anh ạ!';
-  if (gender === 'FEMALE') return 'Dạ em chào chị ạ!';
-  if (callName) return `Dạ em chào ${callName} ạ!`;
-  return 'Dạ em chào anh/chị ạ!';
 }
 
 /**
@@ -90,6 +67,7 @@ Quy tắc bắt buộc:
 - ${pronounRule}
 - Trả lời tối đa 1-3 câu, tự nhiên như người thật đang nhắn tin, không dùng gạch đầu dòng hay liệt kê.
 - LUÔN lịch sự, tôn trọng khách — dù khách hỏi cộc lốc, mặc cả gắt, hay nói chuyện suồng sã, vẫn giữ giọng điệu nhã nhặn, không suồng sã lại, không dùng từ ngữ khiếm nhã hay tỏ ra khó chịu. Khi dẫn dắt khách để lại số, luôn làm điều đó một cách lịch sự, tự nhiên nhất — tuyệt đối không tỏ ra chỉ chăm chăm lấy số của khách.
+- Nếu câu trả lời có từ 2 ý trở lên (vd vừa chào vừa trả lời, hoặc vừa trả lời vừa mời để lại số), LUÔN xuống dòng tách riêng từng ý thành các DÒNG NGẮN — giống hệt cách 1 người thật gõ nhiều dòng tin nhắn ngắn liên tiếp trên điện thoại, tuyệt đối không dồn tất cả thành 1 đoạn văn dài liền mạch. Xuyên suốt mọi câu trả lời phải tự nhiên như hành vi nhắn tin thật của con người, không máy móc.
 - Việc CÓ mời khách để lại số điện thoại/Zalo hay không, và mời như thế nào, PHẢI làm ĐÚNG theo hướng dẫn nêu trong phần "Sự kiện" ở tin nhắn cuối cùng — không tự ý thêm lời mời để lại số nếu "Sự kiện" không yêu cầu, và không được quên nếu "Sự kiện" yêu cầu bắt buộc.
 - Kỹ thuật GÂY TÒ MÒ (curiosity gap) để tăng khả năng khách để lại số: trả lời đúng trọng tâm câu hỏi nhưng KHÔNG kể hết toàn bộ chi tiết trong 1 tin nhắn — chỉ hé lộ vừa đủ để khách thấy đáng tin (dựa trên dữ kiện thật trong THÔNG TIN DỰ ÁN), rồi khéo léo gợi mở rằng còn nhiều thứ hấp dẫn hơn đang chờ nếu để lại số (hình ảnh thực tế lô đất, vị trí chính xác từng lô, bảng giá chi tiết, ưu đãi xe đưa đón miễn phí...) — cố tình chừa lại 1 khoảng trống thông tin để khách tò mò muốn biết thêm, thay vì trả lời cho khách thấy đã đủ và không cần hỏi/để lại số nữa.
 - Không lặp lại y nguyên cấu trúc câu ở mỗi lượt trả lời, tránh nghe máy móc/rập khuôn.
@@ -133,8 +111,14 @@ const PHONE_CTA_HINT =
  */
 export function describeIntent(intent: ReplyIntent, userText: string, isNewCustomer: boolean): string {
   switch (intent.kind) {
+    case 'AI_GREETING':
+      return 'Sự kiện: khách vừa mở cửa sổ chat lần đầu, CHƯA nói/hỏi gì cả. Viết đúng 1 câu chào ngắn, thân thiện, tự nhiên (kiểu "Dạ em chào anh/chị ạ") — không cần hỏi han hay giới thiệu gì thêm vì bên dưới tin này đã có sẵn 3 nút bấm chủ đề cho khách chọn. TUYỆT ĐỐI KHÔNG hỏi số điện thoại/Zalo ở bước này, còn quá sớm.';
     case 'AI_TOPIC':
-      return `Sự kiện: ${TOPIC_LABEL[intent.topic]}. ${GREETING_HINT} Trả lời đúng trọng tâm câu hỏi này, dựa hoàn toàn vào THÔNG TIN DỰ ÁN bên dưới. ${PHONE_CTA_HINT}`;
+      // Nút bấm chỉ có thể xuất hiện SAU khi khách đã nhận tin chào mở màn kèm 3 nút (mục 5.1,
+      // handleFirstOpen gửi AI_GREETING riêng trước đó) -> AI_TOPIC không bao giờ cần tự chào lại,
+      // kể cả lần bấm nút đầu tiên. Trước đây chèn GREETING_HINT vô điều kiện ở đây khiến khách bấm
+      // nút chủ đề thứ 2 trở đi (sau khi đã trò chuyện) vẫn bị AI chào lại từ đầu — sai (mục 4.2).
+      return `Sự kiện: ${TOPIC_LABEL[intent.topic]}. Trả lời đúng trọng tâm câu hỏi này, dựa hoàn toàn vào THÔNG TIN DỰ ÁN bên dưới. ${PHONE_CTA_HINT}`;
     case 'AI_FREE_TEXT':
       return `Sự kiện: khách vừa nhắn/bình luận tự do, nguyên văn: "${userText}". ${
         isNewCustomer ? GREETING_HINT : ''

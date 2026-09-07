@@ -77,9 +77,22 @@ describe('geminiService.buildSystemInstruction (mục 4.2)', () => {
  * đóng hội thoại (gây khó chịu cho khách).
  */
 describe('geminiService.describeIntent (mục 4.2)', () => {
+  it('AI_GREETING -> chào ngắn, TUYỆT ĐỐI không mời để lại số (còn quá sớm, mục 5.1)', () => {
+    const instruction = describeIntent({ kind: 'AI_GREETING' }, '', false);
+    expect(instruction).toMatch(/không hỏi số điện thoại/i);
+    expect(instruction).not.toMatch(/mời khách để lại số zalo\/điện thoại/i);
+  });
+
   it('AI_TOPIC -> bắt buộc phải có hướng dẫn mời để lại số Zalo/điện thoại', () => {
     const instruction = describeIntent({ kind: 'AI_TOPIC', topic: 'price' }, '', false);
     expect(instruction).toMatch(/mời khách để lại số zalo\/điện thoại/i);
+  });
+
+  it('AI_TOPIC -> KHÔNG BAO GIỜ chèn hướng dẫn chào (kể cả isNewCustomer=true), vì nút bấm luôn xảy ra SAU tin chào mở màn (mục 5.1)', () => {
+    const whenNewCustomer = describeIntent({ kind: 'AI_TOPIC', topic: 'location' }, '', true);
+    const whenReturning = describeIntent({ kind: 'AI_TOPIC', topic: 'location' }, '', false);
+    expect(whenNewCustomer).not.toMatch(/lời chào ngắn/i);
+    expect(whenReturning).not.toMatch(/lời chào ngắn/i);
   });
 
   it('AI_FREE_TEXT -> bắt buộc phải có hướng dẫn mời để lại số Zalo/điện thoại', () => {
