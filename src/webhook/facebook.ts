@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import * as crypto from 'crypto';
 import { loadMessages } from '../config/loadConfig';
-import { formatPersonalizedMessage } from '../utils/genderDetector';
+import { formatPersonalizedMessage, determineCustomerGender, analyzeVietnameseName, Gender } from '../utils/genderDetector';
 import {
   ConversationRecord,
   FlowInput,
@@ -160,12 +160,20 @@ async function resolveIntentText(
   userText: string,
   history: AiHistoryEntry[],
   customerName: string | null,
-  isNewCustomer: boolean
+  isNewCustomer: boolean,
+  knownGender?: Gender | null
 ): Promise<{ text: string; updatedHistory?: AiHistoryEntry[] }> {
   const shouldPersistHistory = intent.kind === 'AI_TOPIC' || intent.kind === 'AI_FREE_TEXT';
 
   try {
-    const replyText = await generateAiReply({ intent, userText, history, customerName, isNewCustomer });
+    const replyText = await generateAiReply({
+      intent,
+      userText,
+      history,
+      customerName,
+      isNewCustomer,
+      knownGender,
+    });
     return {
       text: replyText,
       updatedHistory: shouldPersistHistory
@@ -174,7 +182,7 @@ async function resolveIntentText(
     };
   } catch (err) {
     await logError('generateAiReply', err, { intentKind: intent.kind });
-    const fallbackText = formatPersonalizedMessage(loadMessages().aiFallbackText, customerName, userText);
+    const fallbackText = formatPersonalizedMessage(loadMessages().aiFallbackText, customerName, userText, knownGender);
     return {
       text: fallbackText,
       updatedHistory: shouldPersistHistory
@@ -279,7 +287,7 @@ async function loadOrCreateConversation(psid: string): Promise<StoredConversatio
 export async function runFlowTurn(
   psid: string,
   input: FlowInput,
-  getCustomerName: () => Promise<string | null>,
+  _getCustomerName?: () => Promise<string | null>,
   overrideRecipient?: Recipient
 ): Promise<void> {
   await withLock(`psid:${psid}`, async () => {
@@ -292,10 +300,33 @@ export async function runFlowTurn(
     const commentId = overrideRecipient && 'comment_id' in overrideRecipient ? overrideRecipient.comment_id : null;
     const result = processInput(current, input);
 
-    // Lấy tên khách để xưng hô chuẩn xác: ưu tiên tên đã lưu trong session, nếu chưa có thì fetch
+    // Lấy tên và giới tính khách để xưng hô chuẩn xác: ưu tiên từ session, nếu chưa có thì fetch & phân tích
     let customerName = current.customerName ?? null;
-    if (!customerName) {
-      customerName = await getCustomerName();
+    let gender = current.gender ?? null;
+    let avatarUrl = current.avatarUrl ?? null;
+
+    const userText = input.type === 'TEXT' ? input.text : input.type === 'FEED_COMMENT' ? input.text ?? '' : '';
+
+    if (!customerName && _getCustomerName) {
+      customerName = await _getCustomerName();
+    }
+
+    if (!gender) {
+      if (process.env.NODE_ENV === 'test') {
+        const nameAnalysis = analyzeVietnameseName(customerName, userText);
+        gender = nameAnalysis.gender;
+      } else {
+        const profile = await fetchCustomerProfile(psid);
+        if (!customerName) customerName = profile.name;
+        if (!avatarUrl) avatarUrl = profile.profilePicUrl;
+        const genderResult = await determineCustomerGender({
+          customerName,
+          avatarUrl: profile.profilePicUrl,
+          contextText: userText,
+          isSilhouette: profile.isSilhouette,
+        });
+        gender = genderResult.gender;
+      }
     }
 
     if (result.messagesToSend.length > 0) {
@@ -328,7 +359,8 @@ export async function runFlowTurn(
             userText,
             current.aiHistory ?? [],
             customerName,
-            effectiveIsNewCustomer
+            effectiveIsNewCustomer,
+            gender
           );
           if (updatedHistory) updatedAiHistory = updatedHistory;
           return text;
@@ -351,6 +383,8 @@ export async function runFlowTurn(
     let finalRecord: ConversationRecord = {
       ...result.record,
       customerName: customerName ?? current.customerName ?? null,
+      gender: gender ?? current.gender ?? null,
+      avatarUrl: avatarUrl ?? current.avatarUrl ?? null,
     };
 
     if (result.leadPhone) {
@@ -434,53 +468,103 @@ function isKnownButtonPayload(
   return !!payload && (KNOWN_BUTTON_PAYLOADS as readonly string[]).includes(payload);
 }
 
-/**
- * Lấy tên khách hàng tương tác với Page (mục 8):
- * 1. Ưu tiên tra cứu qua `/me/conversations?user_id=${psid}&fields=participants,senders`:
- *    Vì Page Access Token thuộc về Admin của Page, API Inbox của chính Page luôn trả về đầy đủ
- *    họ tên Facebook của người nhắn (`participants.data[].name`) đối với 100% khách hàng
- *    (kể cả người lạ) mà KHÔNG bị giới hạn bởi App Review hay yêu cầu xác minh doanh nghiệp.
- * 2. Fallback sang `/{psid}?fields=first_name,last_name` cho trường hợp đặc biệt hoặc tester.
- */
-async function fetchCustomerName(psid: string): Promise<string | null> {
-  const pageAccessToken = process.env.FB_PAGE_ACCESS_TOKEN;
-  if (!pageAccessToken) return null;
+export interface CustomerProfile {
+  name: string | null;
+  profilePicUrl: string | null;
+  isSilhouette?: boolean;
+}
 
-  // Cách 1: Query qua Page Conversations Inbox (hoạt động cho tất cả người dùng thật)
+/**
+ * Lấy thông tin họ tên và URL ảnh đại diện của khách hàng (Facebook Graph API):
+ * 1. Query trực tiếp `/{psid}?fields=first_name,last_name,name,profile_pic`: Trả về cả họ tên và avatar URL.
+ * 2. Fallback sang `/me/conversations?user_id=${psid}` nếu chưa lấy được tên.
+ * 3. Fallback sang `/{psid}/picture?type=large&redirect=false` để lấy URL avatar và cờ `is_silhouette`.
+ */
+export async function fetchCustomerProfile(psid: string): Promise<CustomerProfile> {
+  const pageAccessToken = process.env.FB_PAGE_ACCESS_TOKEN;
+  if (!pageAccessToken) return { name: null, profilePicUrl: null, isSilhouette: false };
+
+  let name: string | null = null;
+  let profilePicUrl: string | null = null;
+  let isSilhouette = false;
+
+  // Bước 1: Query User Profile Node
   try {
-    const convUrl = `${GRAPH_BASE_URL}/me/conversations?user_id=${psid}&fields=participants,senders&access_token=${pageAccessToken}`;
-    const convRes = await fetch(convUrl);
-    if (convRes.ok) {
-      const convData = (await convRes.json()) as {
-        data?: Array<{
-          participants?: { data?: Array<{ id: string; name?: string }> };
-          senders?: { data?: Array<{ id: string; name?: string }> };
-        }>;
+    const userRes = await fetch(
+      `${GRAPH_BASE_URL}/${psid}?fields=first_name,last_name,name,profile_pic&access_token=${pageAccessToken}`
+    );
+    if (userRes.ok) {
+      const userData = (await userRes.json()) as {
+        first_name?: string;
+        last_name?: string;
+        name?: string;
+        profile_pic?: string;
       };
-      const conversation = convData.data?.[0];
-      const participant =
-        conversation?.participants?.data?.find((p) => p.id === psid) ||
-        conversation?.senders?.data?.find((s) => s.id === psid);
-      if (participant?.name && participant.name.trim()) {
-        return participant.name.trim();
+      if (userData.name && userData.name.trim()) {
+        name = userData.name.trim();
+      } else {
+        const combined = [userData.last_name, userData.first_name].filter(Boolean).join(' ').trim();
+        if (combined) name = combined;
+      }
+      if (userData.profile_pic) {
+        profilePicUrl = userData.profile_pic;
       }
     }
   } catch {
-    // fallback sang cách 2
+    // fallback tiếp
   }
 
-  // Cách 2: Query User Profile Node
-  try {
-    const response = await fetch(
-      `${GRAPH_BASE_URL}/${psid}?fields=first_name,last_name&access_token=${pageAccessToken}`
-    );
-    if (!response.ok) return null;
-    const data = (await response.json()) as { first_name?: string; last_name?: string };
-    const name = [data.last_name, data.first_name].filter(Boolean).join(' ').trim();
-    return name || null;
-  } catch {
-    return null;
+  // Bước 2: Query qua Page Conversations Inbox nếu chưa có tên
+  if (!name) {
+    try {
+      const convUrl = `${GRAPH_BASE_URL}/me/conversations?user_id=${psid}&fields=participants,senders&access_token=${pageAccessToken}`;
+      const convRes = await fetch(convUrl);
+      if (convRes.ok) {
+        const convData = (await convRes.json()) as {
+          data?: Array<{
+            participants?: { data?: Array<{ id: string; name?: string }> };
+            senders?: { data?: Array<{ id: string; name?: string }> };
+          }>;
+        };
+        const conversation = convData.data?.[0];
+        const participant =
+          conversation?.participants?.data?.find((p) => p.id === psid) ||
+          conversation?.senders?.data?.find((s) => s.id === psid);
+        if (participant?.name && participant.name.trim()) {
+          name = participant.name.trim();
+        }
+      }
+    } catch {
+      // bỏ qua
+    }
   }
+
+  // Bước 3: Query picture endpoint nếu chưa có profilePicUrl
+  if (!profilePicUrl) {
+    try {
+      const picRes = await fetch(
+        `${GRAPH_BASE_URL}/${psid}/picture?type=large&redirect=false&access_token=${pageAccessToken}`
+      );
+      if (picRes.ok) {
+        const picData = (await picRes.json()) as {
+          data?: { url?: string; is_silhouette?: boolean };
+        };
+        if (picData.data?.url) {
+          profilePicUrl = picData.data.url;
+          isSilhouette = picData.data.is_silhouette ?? false;
+        }
+      }
+    } catch {
+      // bỏ qua
+    }
+  }
+
+  return { name, profilePicUrl, isSilhouette };
+}
+
+async function fetchCustomerName(psid: string): Promise<string | null> {
+  const profile = await fetchCustomerProfile(psid);
+  return profile.name;
 }
 
 async function handleMessagingEvent(event: MessagingEvent): Promise<void> {
@@ -514,18 +598,39 @@ async function handleFirstOpen(psid: string): Promise<void> {
     if (current && current.state === 'CLOSED') {
       return;
     }
-    const customerName = current?.customerName ?? (await fetchCustomerName(psid));
     await sendTypingOn({ id: psid });
-    const { text } = await resolveIntentText({ kind: 'AI_GREETING' }, '', [], customerName, false);
-    await sendQuickReplyButtons(psid, text);
-    if (!current) {
-      await saveConversation(psid, {
-        state: 'NEW',
-        phone: null,
-        assignedStaff: null,
-        customerName: customerName ?? null,
-      });
+
+    let customerName = current?.customerName ?? null;
+    let gender = current?.gender ?? null;
+    let avatarUrl = current?.avatarUrl ?? null;
+
+    if (!customerName || !gender) {
+      if (process.env.NODE_ENV === 'test') {
+        const nameAnalysis = analyzeVietnameseName(customerName, '');
+        gender = nameAnalysis.gender;
+      } else {
+        const profile = await fetchCustomerProfile(psid);
+        if (!customerName) customerName = profile.name;
+        if (!avatarUrl) avatarUrl = profile.profilePicUrl;
+        const genderResult = await determineCustomerGender({
+          customerName,
+          avatarUrl: profile.profilePicUrl,
+          isSilhouette: profile.isSilhouette,
+        });
+        gender = genderResult.gender;
+      }
     }
+
+    const { text } = await resolveIntentText({ kind: 'AI_GREETING' }, '', [], customerName, false, gender);
+    await sendQuickReplyButtons(psid, text);
+    await saveConversation(psid, {
+      state: current?.state ?? 'NEW',
+      phone: current?.phone ?? null,
+      assignedStaff: current?.assignedStaff ?? null,
+      customerName: customerName ?? null,
+      gender: gender ?? null,
+      avatarUrl: avatarUrl ?? null,
+    });
   } catch (err) {
     await logError('handleFirstOpen', err, { psid });
   }

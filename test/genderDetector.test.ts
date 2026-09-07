@@ -3,6 +3,8 @@ import {
   formatPersonalizedMessage,
   removeVietnameseTones,
   detectGenderFromText,
+  detectGenderFromAvatar,
+  determineCustomerGender,
 } from '../src/utils/genderDetector';
 
 describe('genderDetector', () => {
@@ -192,6 +194,178 @@ describe('genderDetector', () => {
       expect(formatPersonalizedMessage(template3, '')).toBe(
         'Anh/chị nhắn em số zalo nhé. Em gửi vị trí anh/chị tham khảo ạ.'
       );
+    });
+  });
+
+  describe('detectGenderFromAvatar', () => {
+    const originalFetch = global.fetch;
+
+    afterEach(() => {
+      global.fetch = originalFetch;
+    });
+
+    it('nhận diện NAM từ kết quả của Vision AI -> MALE', async () => {
+      global.fetch = jest.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: 'NAM' } }],
+        }),
+      } as Response);
+
+      const result = await detectGenderFromAvatar('https://example.com/avatar.jpg');
+      expect(result).toBe('MALE');
+    });
+
+    it('nhận diện NU từ kết quả của Vision AI -> FEMALE', async () => {
+      global.fetch = jest.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: 'NU' } }],
+        }),
+      } as Response);
+
+      const result = await detectGenderFromAvatar('https://example.com/avatar.jpg');
+      expect(result).toBe('FEMALE');
+    });
+
+    it('Vision AI trả về KHONG_RO -> UNKNOWN', async () => {
+      global.fetch = jest.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: 'KHONG_RO' } }],
+        }),
+      } as Response);
+
+      const result = await detectGenderFromAvatar('https://example.com/avatar.jpg');
+      expect(result).toBe('UNKNOWN');
+    });
+
+    it('URL rỗng hoặc không hợp lệ -> UNKNOWN ngay lập tức mà không gọi fetch', async () => {
+      const mockFetch = jest.fn();
+      global.fetch = mockFetch;
+
+      expect(await detectGenderFromAvatar(null)).toBe('UNKNOWN');
+      expect(await detectGenderFromAvatar('')).toBe('UNKNOWN');
+      expect(await detectGenderFromAvatar('invalid-url')).toBe('UNKNOWN');
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('Fetch bị lỗi mạng hoặc timeout -> fallback an toàn về UNKNOWN', async () => {
+      global.fetch = jest.fn().mockRejectedValueOnce(new Error('Network error'));
+
+      const result = await detectGenderFromAvatar('https://example.com/avatar.jpg');
+      expect(result).toBe('UNKNOWN');
+    });
+  });
+
+  describe('determineCustomerGender (Kết hợp Bộ lọc tên + Avatar Vision)', () => {
+    const originalFetch = global.fetch;
+
+    afterEach(() => {
+      global.fetch = originalFetch;
+    });
+
+    it('ưu tiên khách tự xưng trong tin nhắn (TEXT)', async () => {
+      const result = await determineCustomerGender({
+        customerName: 'Bình',
+        contextText: 'Anh muốn xem sổ đỏ',
+        avatarUrl: 'https://example.com/avatar.jpg',
+      });
+      expect(result.gender).toBe('MALE');
+      expect(result.source).toBe('TEXT');
+      expect(result.callName).toBe('Bình');
+    });
+
+    it('bộ lọc tên xác định rõ ràng Nam -> MALE (NAME)', async () => {
+      const result = await determineCustomerGender({
+        customerName: 'Nguyễn Trọng Hiếu',
+      });
+      expect(result.gender).toBe('MALE');
+      expect(result.source).toBe('NAME');
+      expect(result.callName).toBe('Hiếu');
+    });
+
+    it('bộ lọc tên xác định rõ ràng Nữ -> FEMALE (NAME)', async () => {
+      const result = await determineCustomerGender({
+        customerName: 'Trần Thị Mai',
+      });
+      expect(result.gender).toBe('FEMALE');
+      expect(result.source).toBe('NAME');
+      expect(result.callName).toBe('Mai');
+    });
+
+    it('tên trung tính (Bình) kết hợp Avatar Nam -> MALE (AVATAR)', async () => {
+      global.fetch = jest.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: 'NAM' } }],
+        }),
+      } as Response);
+
+      const result = await determineCustomerGender({
+        customerName: 'Bình',
+        avatarUrl: 'https://example.com/avatar_male.jpg',
+      });
+      expect(result.gender).toBe('MALE');
+      expect(result.source).toBe('AVATAR');
+      expect(result.callName).toBe('Bình');
+    });
+
+    it('nickname (Mèo Béo) kết hợp Avatar Nữ -> FEMALE (AVATAR)', async () => {
+      global.fetch = jest.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: 'NU' } }],
+        }),
+      } as Response);
+
+      const result = await determineCustomerGender({
+        customerName: 'Mèo Béo',
+        avatarUrl: 'https://example.com/avatar_female.jpg',
+      });
+      expect(result.gender).toBe('FEMALE');
+      expect(result.source).toBe('AVATAR');
+    });
+
+    it('tên trung tính + avatar là ảnh phong cảnh (KHONG_RO) -> UNKNOWN (DEFAULT)', async () => {
+      global.fetch = jest.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: 'KHONG_RO' } }],
+        }),
+      } as Response);
+
+      const result = await determineCustomerGender({
+        customerName: 'Bình',
+        avatarUrl: 'https://example.com/landscape.jpg',
+      });
+      expect(result.gender).toBe('UNKNOWN');
+      expect(result.source).toBe('DEFAULT');
+    });
+
+    it('isSilhouette = true (avatar mặc định Facebook) -> không gọi fetch, trả về kết quả theo tên', async () => {
+      const mockFetch = jest.fn();
+      global.fetch = mockFetch;
+
+      const result = await determineCustomerGender({
+        customerName: 'Bình',
+        avatarUrl: 'https://example.com/default.jpg',
+        isSilhouette: true,
+      });
+      expect(result.gender).toBe('UNKNOWN');
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('formatPersonalizedMessage với knownGender', () => {
+    it('áp dụng knownGender = MALE bỏ qua tên trung tính', () => {
+      const template = 'Em chào anh/chị.';
+      expect(formatPersonalizedMessage(template, 'Bình', null, 'MALE')).toBe('Em chào anh.');
+    });
+
+    it('áp dụng knownGender = FEMALE bỏ qua tên trung tính', () => {
+      const template = 'Em chào anh/chị.';
+      expect(formatPersonalizedMessage(template, 'Bình', null, 'FEMALE')).toBe('Em chào chị.');
     });
   });
 });

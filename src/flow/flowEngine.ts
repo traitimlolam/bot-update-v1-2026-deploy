@@ -7,6 +7,8 @@ export interface ConversationRecord {
   phone: string | null;
   assignedStaff: string | null;
   customerName?: string | null;
+  gender?: 'MALE' | 'FEMALE' | 'UNKNOWN' | null;
+  avatarUrl?: string | null;
 }
 
 export function newConversation(): ConversationRecord {

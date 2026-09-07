@@ -195,11 +195,13 @@ export function analyzeVietnameseName(
 export function formatPersonalizedMessage(
   template: string,
   customerName: string | null | undefined,
-  contextText: string | null | undefined = null
+  contextText: string | null | undefined = null,
+  knownGender?: Gender | null
 ): string {
   if (!template) return '';
 
-  const { gender } = analyzeVietnameseName(customerName, contextText);
+  const { gender: analyzedGender } = analyzeVietnameseName(customerName, contextText);
+  const gender = knownGender && knownGender !== 'UNKNOWN' ? knownGender : analyzedGender;
 
   let pronounLower = 'anh/chị';
   let pronounCap = 'Anh/chị';
@@ -230,4 +232,133 @@ export function formatPersonalizedMessage(
     .replace(/Anh\/chị/g, pronounCap)
     .replace(/anh\/chị/g, pronounLower)
     .replace(/anh chị/g, pronounLower);
+}
+
+/**
+ * Nhận diện giới tính từ ảnh đại diện Facebook (profile_pic) thông qua Gemini Vision (9Router).
+ * Bọc timeout 6 giây để không bao giờ làm nghẽn tiến trình webhook.
+ * Trả về: 'MALE' | 'FEMALE' | 'UNKNOWN'.
+ */
+export async function detectGenderFromAvatar(
+  avatarUrl: string | null | undefined,
+  options?: {
+    routerBaseUrl?: string;
+    routerApiKey?: string;
+    modelName?: string;
+    timeoutMs?: number;
+  }
+): Promise<Gender> {
+  if (!avatarUrl || typeof avatarUrl !== 'string' || !avatarUrl.startsWith('http')) {
+    return 'UNKNOWN';
+  }
+
+  const routerBaseUrl = options?.routerBaseUrl || process.env.AI_ROUTER_URL || 'http://100.93.163.100:20128/v1';
+  const routerApiKey = options?.routerApiKey || process.env.AI_ROUTER_API_KEY;
+  const modelName = options?.modelName || process.env.AI_MODEL_NAME || 'ag/gemini-3.8-flash-high';
+  const timeoutMs = options?.timeoutMs || 6000;
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    const body = {
+      model: modelName,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: 'Hãy nhìn ảnh đại diện này và trả lời chính xác một từ duy nhất: NAM hoặc NU hoặc KHONG_RO (nếu là ảnh phong cảnh, đồ vật, anime, hoạt hình, hoa lá, không có người, hoặc không thể xác định rõ nam hay nữ).',
+            },
+            {
+              type: 'image_url',
+              image_url: { url: avatarUrl },
+            },
+          ],
+        },
+      ],
+      stream: false,
+      max_tokens: 10,
+    };
+
+    const response = await fetch(`${routerBaseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(routerApiKey ? { Authorization: `Bearer ${routerApiKey}` } : {}),
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timer);
+
+    if (!response.ok) {
+      return 'UNKNOWN';
+    }
+
+    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const rawContent = data?.choices?.[0]?.message?.content ?? '';
+    const normalized = removeVietnameseTones(rawContent).trim().toUpperCase();
+
+    if (normalized.includes('NAM') && !normalized.includes('KHONG_RO')) {
+      return 'MALE';
+    }
+    if (normalized.includes('NU') && !normalized.includes('KHONG_RO')) {
+      return 'FEMALE';
+    }
+    return 'UNKNOWN';
+  } catch {
+    // Timeout hoặc lỗi mạng -> an toàn fallback về UNKNOWN
+    return 'UNKNOWN';
+  }
+}
+
+export interface DetermineGenderParams {
+  customerName?: string | null;
+  avatarUrl?: string | null;
+  contextText?: string | null;
+  isSilhouette?: boolean;
+}
+
+/**
+ * Tổng hợp dự đoán giới tính từ nội dung tin nhắn, bộ lọc tên tiếng Việt và Gemini Vision ảnh đại diện.
+ */
+export async function determineCustomerGender(params: DetermineGenderParams): Promise<{
+  gender: Gender;
+  callName: string;
+  source: 'TEXT' | 'NAME' | 'AVATAR' | 'DEFAULT';
+}> {
+  const { customerName, avatarUrl, contextText, isSilhouette } = params;
+
+  // 1. Phân tích tên & trích xuất callName
+  const nameAnalysis = analyzeVietnameseName(customerName, contextText);
+  const callName = nameAnalysis.callName;
+
+  // Nếu khách tự xưng trong tin nhắn (vd "anh cần", "chị muốn") -> Ưu tiên tuyệt đối 100%
+  const textGender = detectGenderFromText(contextText);
+  if (textGender !== 'UNKNOWN') {
+    return { gender: textGender, callName, source: 'TEXT' };
+  }
+
+  // 2. Kiểm tra avatar nếu có ảnh thật (không phải silhouette mặc định)
+  let avatarGender: Gender = 'UNKNOWN';
+  if (avatarUrl && !isSilhouette) {
+    avatarGender = await detectGenderFromAvatar(avatarUrl);
+  }
+
+  // 3. Kết hợp kết quả từ Avatar và Tên:
+  // Nếu Avatar xác định được rõ ràng (MALE hoặc FEMALE)
+  if (avatarGender === 'MALE' || avatarGender === 'FEMALE') {
+    return { gender: avatarGender, callName, source: 'AVATAR' };
+  }
+
+  // 4. Nếu Avatar là UNKNOWN (ảnh cảnh, anime, đồ vật, hoặc không lấy được) -> Dựa vào bộ lọc Tên
+  if (nameAnalysis.gender !== 'UNKNOWN') {
+    return { gender: nameAnalysis.gender, callName, source: 'NAME' };
+  }
+
+  // 5. Cả 2 đều không xác định được -> UNKNOWN
+  return { gender: 'UNKNOWN', callName, source: 'DEFAULT' };
 }

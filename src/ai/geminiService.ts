@@ -1,5 +1,5 @@
 import { AREA_KNOWLEDGE_BASE } from '../config/knowledgeBase';
-import { analyzeVietnameseName } from '../utils/genderDetector';
+import { analyzeVietnameseName, Gender } from '../utils/genderDetector';
 import { withRetry } from '../util/retry';
 import { ReplyIntent, ReplyTopic } from '../flow/flowEngine';
 import { PhoneErrorType } from '../flow/phoneValidator';
@@ -42,8 +42,9 @@ export interface AiHistoryTurn {
  * SỰ KIỆN cụ thể của lượt trả lời (bấm nút nào, câu hỏi gì, lỗi số điện thoại gì...) được ghép vào
  * tin nhắn "user" cuối cùng ở `describeIntent`, không đưa vào đây.
  */
-export function buildSystemInstruction(customerName: string | null): string {
-  const { gender, callName } = analyzeVietnameseName(customerName);
+export function buildSystemInstruction(customerName: string | null, knownGender: Gender | null = null): string {
+  const { gender: analyzedGender, callName } = analyzeVietnameseName(customerName);
+  const gender = knownGender && knownGender !== 'UNKNOWN' ? knownGender : analyzedGender;
 
   let pronounRule: string;
   if (gender === 'MALE') {
@@ -159,6 +160,7 @@ export interface GenerateAiReplyParams {
   customerName: string | null;
   /** true nếu đây là lượt trả lời đầu tiên gửi cho khách này (mục 5.2: chỉ NEW mới cần chào). */
   isNewCustomer: boolean;
+  knownGender?: Gender | null;
 }
 
 /**
@@ -166,11 +168,11 @@ export interface GenerateAiReplyParams {
  * mọi lời gọi ra ngoài khác.
  */
 export async function generateAiReply(params: GenerateAiReplyParams): Promise<string> {
-  const { intent, userText, history, customerName, isNewCustomer } = params;
+  const { intent, userText, history, customerName, isNewCustomer, knownGender } = params;
 
   return withRetry(async () => {
     const messages = [
-      { role: 'system', content: buildSystemInstruction(customerName) },
+      { role: 'system', content: buildSystemInstruction(customerName, knownGender) },
       ...history.map((turn) => ({
         role: turn.role === 'model' ? 'assistant' : 'user',
         content: turn.text,
@@ -210,11 +212,11 @@ export async function generateAiReply(params: GenerateAiReplyParams): Promise<st
     }
 
     // Bảo đảm triệt để đại từ xưng hô theo bộ lọc giới tính:
-    // Nếu bộ lọc đã xác định rõ NAM hoặc NỮ, thay thế mọi từ "anh/chị" còn sót lại thành "anh" hoặc "chị"
-    const { gender } = analyzeVietnameseName(customerName, userText);
-    if (gender === 'MALE') {
+    // Nếu bộ lọc/avatar đã xác định rõ NAM hoặc NỮ, thay thế mọi từ "anh/chị" còn sót lại thành "anh" hoặc "chị"
+    const effectiveGender = knownGender && knownGender !== 'UNKNOWN' ? knownGender : analyzeVietnameseName(customerName, userText).gender;
+    if (effectiveGender === 'MALE') {
       text = text.replace(/anh\/chị/g, 'anh').replace(/Anh\/chị/g, 'Anh').replace(/anh\/Chị/g, 'anh').replace(/Anh\/Chị/g, 'Anh');
-    } else if (gender === 'FEMALE') {
+    } else if (effectiveGender === 'FEMALE') {
       text = text.replace(/anh\/chị/g, 'chị').replace(/Anh\/chị/g, 'Chị').replace(/anh\/Chị/g, 'chị').replace(/Anh\/Chị/g, 'Chị');
     }
 
