@@ -13,15 +13,27 @@ export function newConversation(): ConversationRecord {
   return { state: 'NEW', phone: null, assignedStaff: null, customerName: null };
 }
 
-export type MessageCode = 'M1' | 'M2' | 'M3' | 'M4' | 'M5' | 'M6_SHORT' | 'M6_LONG' | 'M6_INVALID' | 'M7';
+export type ReplyTopic = 'location' | 'legal' | 'price';
 
 /**
- * Tín hiệu "chỗ này cần AI trả lời tự do" (mục 4.2) — KHÔNG phải khoá trong `messages.json`.
- * flowEngine chỉ đặt giá trị này vào `messagesToSend`, không tự gọi Gemini (vẫn là hàm thuần, không
- * gọi API bên ngoài — mục 3). Chỉ lớp gọi ngoài (`webhook/facebook.ts`) mới hiểu mã này và gọi sang
- * `ai/geminiService.generateAiReply`, thay vì tra `messages.json` như các mã khác.
+ * Ý định trả lời (mục 4.2 mở rộng — "giao toàn quyền cho Gemini trả lời"): flowEngine không còn tra
+ * message code cố định cho nội dung hội thoại — chỉ còn 'M3' (CTA xin số Zalo) là literal, vẫn do
+ * code tự đảm bảo gửi, không giao cho AI, để mục tiêu chốt lead không phụ thuộc việc AI có "tự giác"
+ * nhắc hay không (nguyên tắc bất biến từ đầu dự án). Toàn bộ CÂU CHỮ còn lại — kể cả các sự kiện hệ
+ * thống như xác nhận đã nhận số, báo sai định dạng số điện thoại, hay đã chuyển nhân viên phụ trách —
+ * đều do lớp gọi ngoài (`webhook/facebook.ts`) gọi sang `ai/geminiService.ts` để Gemini viết linh hoạt
+ * theo đúng SỰ KIỆN mà code đã xác định. flowEngine chỉ mô tả Ý ĐỊNH cần trả lời (sự kiện gì vừa xảy
+ * ra), không tự quyết định nội dung câu chữ và không tự gọi API (vẫn là hàm thuần — mục 3).
  */
-export type OutgoingMessage = MessageCode | 'AI_REPLY';
+export type ReplyIntent =
+  | { kind: 'AI_TOPIC'; topic: ReplyTopic }
+  | { kind: 'AI_FREE_TEXT' }
+  | { kind: 'AI_PHONE_CONFIRMED' }
+  | { kind: 'AI_PHONE_INVALID'; errorType: PhoneErrorType }
+  | { kind: 'AI_FOLLOWUP_CLOSED' };
+
+/** 'M3' là mã message CỐ ĐỊNH DUY NHẤT còn lại trong hệ thống — CTA xin số Zalo. */
+export type OutgoingMessage = 'M3' | ReplyIntent;
 
 export type FlowInput =
   | { type: 'BUTTON'; payload: 'BTN_LOCATION' | 'BTN_LEGAL' | 'BTN_PRICE' }
@@ -48,25 +60,18 @@ export interface FlowResult {
   trackFollowUp: boolean;
 }
 
-const LOCATION_OR_PRICE_SEQUENCE: MessageCode[] = ['M1', 'M2', 'M3'];
-const LEGAL_SEQUENCE: MessageCode[] = ['M1', 'M4', 'M3'];
-
-export function phoneErrorToMessage(errorType: PhoneErrorType): MessageCode {
-  switch (errorType) {
-    case 'missing':
-      return 'M6_SHORT';
-    case 'excess':
-      return 'M6_LONG';
-    case 'invalidPrefix':
-      return 'M6_INVALID';
-  }
-}
+const BUTTON_TOPIC: Record<'BTN_LOCATION' | 'BTN_LEGAL' | 'BTN_PRICE', ReplyTopic> = {
+  BTN_LOCATION: 'location',
+  BTN_LEGAL: 'legal',
+  BTN_PRICE: 'price',
+};
 
 /**
  * State machine hội thoại thuần (mục 5, 6 CLAUDE.md).
- * Không gọi API bên ngoài — nhận state hiện tại, trả state mới + danh sách message code cần gửi theo thứ tự.
- * Lớp gọi ngoài (webhook/facebook.ts) chịu trách nhiệm: gửi từng message cách nhau >=2s kèm typing_on,
- * ghi Sheet + round-robin khi leadPhone khác null, rồi mới persist `record` trả về vào Firestore.
+ * Không gọi API bên ngoài — nhận state hiện tại, trả state mới + danh sách ý định trả lời cần gửi
+ * theo thứ tự. Lớp gọi ngoài (webhook/facebook.ts) chịu trách nhiệm: dịch từng ý định thành câu chữ
+ * thật (qua Gemini, có fallback), gửi từng tin cách nhau >=2s kèm typing_on, ghi Sheet + round-robin
+ * khi leadPhone khác null, rồi mới persist `record` trả về vào Firestore.
  *
  * TEXT (tin nhắn Messenger) và FEED_COMMENT kèm `text` (comment trên Page) dùng chung đúng 1 nhánh xử
  * lý số điện thoại/hỏi-lại bên dưới (mục 5.3: "dùng chung state theo PSID như mục 5.2") — tránh cài đặt
@@ -74,8 +79,9 @@ export function phoneErrorToMessage(errorType: PhoneErrorType): MessageCode {
  */
 export function processInput(current: ConversationRecord, input: FlowInput): FlowResult {
   // CLOSED: không tạo lead mới trên tab tháng, không đổi assignedStaff, dù khách gửi thêm gì — nhưng
-  // KHÔNG còn im lặng hoàn toàn như trước: trả lời M7 để trấn an khách đã bàn giao nhân viên (mục 6,
-  // AC6), đồng thời quét luôn nội dung để phát hiện khách đang SỬA LẠI số điện thoại (mục 6, 8c).
+  // KHÔNG còn im lặng hoàn toàn như trước: trả lời (do AI viết) để trấn an khách đã bàn giao nhân
+  // viên (mục 6, AC6), đồng thời quét luôn nội dung để phát hiện khách đang SỬA LẠI số điện thoại
+  // (mục 6, 8c).
   if (current.state === 'CLOSED') {
     const text = input.type === 'TEXT' ? input.text : input.type === 'FEED_COMMENT' ? input.text ?? '' : '';
     const phoneCheck = checkPhone(text);
@@ -85,7 +91,7 @@ export function processInput(current: ConversationRecord, input: FlowInput): Flo
       // đối không đụng Sheet (mục 7 điểm 6) — không copy sang "Hỏi lại" ở nhánh này.
       return {
         record: current,
-        messagesToSend: [phoneErrorToMessage(phoneCheck.errorType)],
+        messagesToSend: [{ kind: 'AI_PHONE_INVALID', errorType: phoneCheck.errorType }],
         leadPhone: null,
         correctedPhone: null,
         trackFollowUp: false,
@@ -100,7 +106,7 @@ export function processInput(current: ConversationRecord, input: FlowInput): Flo
 
     return {
       record: correctedPhone ? { ...current, phone: correctedPhone } : current,
-      messagesToSend: ['M7'],
+      messagesToSend: [{ kind: 'AI_FOLLOWUP_CLOSED' }],
       leadPhone: null,
       correctedPhone,
       trackFollowUp: true,
@@ -108,11 +114,9 @@ export function processInput(current: ConversationRecord, input: FlowInput): Flo
   }
 
   if (input.type === 'BUTTON') {
-    const sequence =
-      input.payload === 'BTN_LEGAL' ? LEGAL_SEQUENCE : LOCATION_OR_PRICE_SEQUENCE;
     return {
       record: { ...current, state: 'IN_PROGRESS' },
-      messagesToSend: sequence,
+      messagesToSend: [{ kind: 'AI_TOPIC', topic: BUTTON_TOPIC[input.payload] }, 'M3'],
       leadPhone: null,
       correctedPhone: null,
       trackFollowUp: false,
@@ -134,7 +138,7 @@ export function processInput(current: ConversationRecord, input: FlowInput): Flo
     };
     return {
       record,
-      messagesToSend: ['M5'],
+      messagesToSend: [{ kind: 'AI_PHONE_CONFIRMED' }],
       leadPhone: phoneCheck.normalizedPhone,
       correctedPhone: null,
       trackFollowUp: false,
@@ -142,27 +146,22 @@ export function processInput(current: ConversationRecord, input: FlowInput): Flo
   }
 
   if (phoneCheck.errorType !== null) {
-    // Sai định dạng: trả lời M6, tuyệt đối không ghi Sheet, state giữ nguyên (mục 5.2, 7, 8).
+    // Sai định dạng: báo lỗi (do AI viết), tuyệt đối không ghi Sheet, state giữ nguyên (mục 5.2, 7, 8).
     return {
       record: current,
-      messagesToSend: [phoneErrorToMessage(phoneCheck.errorType)],
+      messagesToSend: [{ kind: 'AI_PHONE_INVALID', errorType: phoneCheck.errorType }],
       leadPhone: null,
       correctedPhone: null,
       trackFollowUp: false,
     };
   }
 
-  // Không có chuỗi số ứng viên nào (mục 4.2):
-  // - NEW: Khách nhắn lần đầu -> gửi M1, để AI trả lời đúng câu hỏi khách vừa hỏi (dựa trên
-  //   knowledgeBase.ts), rồi gửi M3 xin số zalo. Chuyển state thành IN_PROGRESS.
-  // - IN_PROGRESS: Đã nhắn cho khách 1 lần rồi (từ chat hoặc từ comment), khi khách nhắn thêm dòng thứ 2
-  //   trở đi hoặc khách comment nhắn lại -> để AI trả lời câu hỏi mới rồi gửi thêm M3, không gửi lại M1.
-  const messagesToSend: OutgoingMessage[] =
-    current.state === 'IN_PROGRESS' ? ['AI_REPLY', 'M3'] : ['M1', 'AI_REPLY', 'M3'];
-
+  // Không có chuỗi số ứng viên nào (mục 4.2): để AI trả lời đúng câu hỏi/nội dung khách vừa nhắn rồi
+  // gửi thêm M3 xin số zalo — áp dụng như nhau dù đây là lần đầu (NEW) hay nhắn thêm/hỏi lại
+  // (IN_PROGRESS), vì không còn tin chào M1 cố định để phân biệt 2 trường hợp này nữa.
   return {
     record: { ...current, state: 'IN_PROGRESS' },
-    messagesToSend,
+    messagesToSend: [{ kind: 'AI_FREE_TEXT' }, 'M3'],
     leadPhone: null,
     correctedPhone: null,
     trackFollowUp: false,

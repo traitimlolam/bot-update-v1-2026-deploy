@@ -96,7 +96,12 @@ describe('runFlowTurn: appendLead chỉ được gọi khi số điện thoại 
 
     expect(mockedGenerateAiReply).toHaveBeenCalledTimes(1);
     expect(mockedGenerateAiReply).toHaveBeenCalledWith(
-      expect.objectContaining({ userMessage: 'duong o to may met vay em', history: [], customerName: 'Khách A' })
+      expect.objectContaining({
+        intent: { kind: 'AI_FREE_TEXT' },
+        userText: 'duong o to may met vay em',
+        history: [],
+        customerName: 'Khách A',
+      })
     );
 
     expect(mockedUpdateAiHistory).toHaveBeenCalledTimes(1);

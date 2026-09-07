@@ -5,13 +5,12 @@ import { formatPersonalizedMessage } from '../utils/genderDetector';
 import {
   ConversationRecord,
   FlowInput,
-  MessageCode,
   newConversation,
   OutgoingMessage,
-  phoneErrorToMessage,
   processInput,
+  ReplyIntent,
 } from '../flow/flowEngine';
-import { checkPhone } from '../flow/phoneValidator';
+import { checkPhone, PhoneErrorType } from '../flow/phoneValidator';
 import {
   AiHistoryEntry,
   getConversation,
@@ -29,7 +28,7 @@ import {
   LeadSource,
   updateLeadPhoneAndCopyToFollowUpSheet,
 } from '../services/sheetsService';
-import { generateAiReply } from '../ai/geminiService';
+import { buildCommentGreeting, buildNaturalGreeting, generateAiReply } from '../ai/geminiService';
 import { withRetry } from '../util/retry';
 
 const GRAPH_API_VERSION = 'v19.0';
@@ -121,7 +120,7 @@ export async function sendText(recipient: Recipient, text: string): Promise<stri
 
 async function sendQuickReplyButtons(psid: string, customerName?: string | null): Promise<void> {
   const messages = loadMessages();
-  const text = formatPersonalizedMessage(messages.M1, customerName);
+  const text = buildNaturalGreeting(customerName ?? null);
   await callSendApi({
     recipient: { id: psid },
     messaging_type: 'RESPONSE',
@@ -141,65 +140,82 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
- * Gọi Gemini sinh câu trả lời tự do (mục 4.2) và trả về lịch sử đã cập nhật để caller tự quyết định
- * lúc nào persist (`updateAiHistory`) — tách khỏi việc ghi Firestore để hàm này dùng chung được cho
- * cả `runFlowTurn` (đã đọc `current.aiHistory`) lẫn luồng comment hand-rolled (đọc `existing.aiHistory`).
+ * Gọi Gemini sinh câu trả lời cho 1 `ReplyIntent` (mục 4.2 mở rộng, `flow/flowEngine.ts`) và trả về
+ * lịch sử đã cập nhật để caller tự quyết định lúc nào persist (`updateAiHistory`) — tách khỏi việc
+ * ghi Firestore để hàm này dùng chung được cho cả `runFlowTurn` lẫn các nhánh comment hand-rolled.
+ *
+ * Chỉ trả `updatedHistory` (để caller lưu lại) cho 2 intent KHÔNG BAO GIỜ phát sinh từ 1 tin có chứa
+ * số điện thoại — `AI_TOPIC`/`AI_FREE_TEXT` (mục 5.2/5.3: chỉ được gọi khi `phoneValidator` xác nhận
+ * tin không có chuỗi số ứng viên nào). 3 intent còn lại (`AI_PHONE_CONFIRMED`/`AI_PHONE_INVALID`/
+ * `AI_FOLLOWUP_CLOSED`) luôn phát sinh đúng lúc tin nhắn CÓ thể chứa số điện thoại thật của khách —
+ * cố tình KHÔNG lưu vào `aiHistory` để tuyệt đối không rò rỉ số điện thoại vào lịch sử gửi cho AI
+ * (mục 4.2: "trường này không bao giờ chứa số điện thoại thật của khách").
+ *
  * Fallback bắt buộc (mục 4.2, AC16): nếu Gemini lỗi/timeout (đã hết retry trong `generateAiReply`)
  * hoặc trả rỗng, dùng lại nguyên văn M2 làm câu trả lời thay thế thay vì để khách không nhận được
  * tin nào, đồng thời log lỗi để theo dõi tần suất fallback.
  */
-async function resolveAiReplyText(
+async function resolveIntentText(
+  intent: ReplyIntent,
   userText: string,
   history: AiHistoryEntry[],
-  customerName: string | null
-): Promise<{ text: string; updatedHistory: AiHistoryEntry[] }> {
+  customerName: string | null,
+  isNewCustomer: boolean
+): Promise<{ text: string; updatedHistory?: AiHistoryEntry[] }> {
+  const shouldPersistHistory = intent.kind === 'AI_TOPIC' || intent.kind === 'AI_FREE_TEXT';
+
   try {
-    const replyText = await generateAiReply({ userMessage: userText, history, customerName });
+    const replyText = await generateAiReply({ intent, userText, history, customerName, isNewCustomer });
     return {
       text: replyText,
-      updatedHistory: [...history, { role: 'user', text: userText }, { role: 'model', text: replyText }],
+      updatedHistory: shouldPersistHistory
+        ? [...history, { role: 'user', text: userText }, { role: 'model', text: replyText }]
+        : undefined,
     };
   } catch (err) {
-    await logError('generateAiReply', err, { userText });
+    await logError('generateAiReply', err, { intentKind: intent.kind });
     const fallbackText = formatPersonalizedMessage(loadMessages().M2, customerName);
     return {
       text: fallbackText,
-      updatedHistory: [...history, { role: 'user', text: userText }, { role: 'model', text: fallbackText }],
+      updatedHistory: shouldPersistHistory
+        ? [...history, { role: 'user', text: userText }, { role: 'model', text: fallbackText }]
+        : undefined,
     };
   }
 }
 
 /**
- * Gửi tuần tự danh sách message code, mỗi tin cách nhau >=2s kèm typing_on (mục 4).
- * Trả về PSID nếu recipient ban đầu là comment_id và Facebook trả về recipient_id thật.
+ * Gửi tuần tự danh sách `OutgoingMessage` ('M3' | `ReplyIntent`), mỗi tin cách nhau >=2s kèm
+ * typing_on (mục 4). Trả về PSID nếu recipient ban đầu là comment_id và Facebook trả về recipient_id
+ * thật.
  *
  * `keepOriginalRecipient` (mặc định false, giữ hành vi cũ cho luồng BUTTON/TEXT vốn đã gọi bằng
  * { id: psid } — chuyển sang { id } sau tin đầu không ảnh hưởng gì vì đã là { id } sẵn): khi true,
  * KHÔNG tự chuyển sang { id: resolvedPsid } sau tin đầu tiên dù Facebook có trả recipient_id — dùng
- * cho trường hợp gửi tiếp M2/M3 qua Private Reply ({ comment_id }) cho người CHỈ MỚI comment, chưa
- * từng chủ động nhắn tin: nếu đổi sang { id }, Facebook từ chối với lỗi 551/1545041 "Người này hiện
- * không có mặt" vì người đó chưa mở cuộc trò chuyện thật — phải giữ nguyên comment_id cho MỌI tin.
+ * cho trường hợp gửi tiếp các tin còn lại qua Private Reply ({ comment_id }) cho người CHỈ MỚI
+ * comment, chưa từng chủ động nhắn tin: nếu đổi sang { id }, Facebook từ chối với lỗi 551/1545041
+ * "Người này hiện không có mặt" vì người đó chưa mở cuộc trò chuyện thật — phải giữ nguyên comment_id
+ * cho MỌI tin.
  *
- * `resolveAiReplyText` (mục 4.2): lazy resolver được gọi ĐÚNG 1 lần nếu `codes` chứa `'AI_REPLY'`
- * (thiết kế của flowEngine chỉ bao giờ đặt tối đa 1 phần tử này trong 1 lượt) — không tra
- * `messages.json` cho mã này. Bắt buộc phải truyền khi `codes` có `'AI_REPLY'`.
+ * `resolveIntentTextFn`: bắt buộc phải truyền khi `items` chứa bất kỳ `ReplyIntent` nào (mọi phần tử
+ * không phải chuỗi literal 'M3').
  */
 async function sendMessageSequence(
   recipient: Recipient,
-  codes: OutgoingMessage[],
+  items: OutgoingMessage[],
   keepOriginalRecipient = false,
   customerName?: string | null,
-  resolveAiReplyTextFn?: () => Promise<string>
+  resolveIntentTextFn?: (intent: ReplyIntent) => Promise<string>
 ): Promise<string | undefined> {
   const messages = loadMessages();
   let resolvedPsid: string | undefined;
   let currentRecipient = recipient;
 
-  for (let i = 0; i < codes.length; i++) {
+  for (let i = 0; i < items.length; i++) {
     await sendTypingOn(currentRecipient);
-    const code = codes[i];
+    const item = items[i];
     const text =
-      code === 'AI_REPLY' ? await resolveAiReplyTextFn!() : formatPersonalizedMessage(messages[code], customerName);
+      item === 'M3' ? formatPersonalizedMessage(messages.M3, customerName) : await resolveIntentTextFn!(item);
     const recipientId = await sendText(currentRecipient, text);
     if (recipientId && !resolvedPsid) {
       resolvedPsid = recipientId;
@@ -207,7 +223,7 @@ async function sendMessageSequence(
         currentRecipient = { id: recipientId };
       }
     }
-    if (i < codes.length - 1) {
+    if (i < items.length - 1) {
       await delay(MIN_DELAY_BETWEEN_MESSAGES_MS);
     }
   }
@@ -240,10 +256,15 @@ export async function runFlowTurn(
   psid: string,
   input: FlowInput,
   getCustomerName: () => Promise<string | null>,
-  overrideRecipient?: Recipient
+  overrideRecipient?: Recipient,
+  suppressGreeting = false
 ): Promise<void> {
   await withLock(`psid:${psid}`, async () => {
     const current = await loadOrCreateConversation(psid);
+    // mục 5.2: chỉ khách NEW mới cần AI chào ở đầu câu trả lời — `suppressGreeting` dùng khi lớp gọi
+    // ngoài đã tự gửi 1 lời chào riêng trước đó trong CÙNG lượt xử lý (vd probe PSID qua comment_id,
+    // mục 5.3) để tránh AI chào lần thứ 2 chồng lên lời chào vừa gửi.
+    const isNewCustomer = !suppressGreeting && current.state === 'NEW';
     const result = processInput(current, input);
 
     // Lấy tên khách để xưng hô chuẩn xác: ưu tiên tên đã lưu trong session, nếu chưa có thì fetch
@@ -257,25 +278,28 @@ export async function runFlowTurn(
         const targetRecipient: Recipient = overrideRecipient ?? { id: psid };
         const keepOriginal = overrideRecipient !== undefined && 'comment_id' in overrideRecipient;
 
-        // Mục 4.2: chỉ khi messagesToSend có 'AI_REPLY' mới cần resolver + lưu lại lịch sử sau đó —
-        // đọc userText từ chính `input` của lượt này (TEXT/FEED_COMMENT), không cần flowEngine trả về.
+        // mục 4.2: đọc userText từ chính `input` của lượt này (TEXT/FEED_COMMENT) — dùng chung cho
+        // bất kỳ ReplyIntent nào xuất hiện trong messagesToSend (flowEngine chỉ bao giờ đặt tối đa 1).
+        const userText = input.type === 'TEXT' ? input.text : input.type === 'FEED_COMMENT' ? input.text ?? '' : '';
         let updatedAiHistory: AiHistoryEntry[] | undefined;
-        const needsAiReply = result.messagesToSend.includes('AI_REPLY');
-        const aiReplyResolver = needsAiReply
-          ? async () => {
-              const userText = input.type === 'TEXT' ? input.text : input.type === 'FEED_COMMENT' ? input.text ?? '' : '';
-              const { text, updatedHistory } = await resolveAiReplyText(userText, current.aiHistory ?? [], customerName);
-              updatedAiHistory = updatedHistory;
-              return text;
-            }
-          : undefined;
+        const intentResolver = async (intent: ReplyIntent) => {
+          const { text, updatedHistory } = await resolveIntentText(
+            intent,
+            userText,
+            current.aiHistory ?? [],
+            customerName,
+            isNewCustomer
+          );
+          if (updatedHistory) updatedAiHistory = updatedHistory;
+          return text;
+        };
 
         await sendMessageSequence(
           targetRecipient,
           result.messagesToSend,
           keepOriginal,
           customerName,
-          aiReplyResolver
+          intentResolver
         );
 
         if (updatedAiHistory) {
@@ -495,13 +519,15 @@ async function handleMappedCommentTurn(
   psid: string,
   commentId: string,
   commentText: string,
-  customerName: string | null
+  customerName: string | null,
+  suppressGreeting = false
 ): Promise<void> {
   await runFlowTurn(
     psid,
     { type: 'FEED_COMMENT', text: commentText },
     async () => customerName,
-    { comment_id: commentId }
+    { comment_id: commentId },
+    suppressGreeting
   );
 }
 
@@ -517,14 +543,13 @@ async function handleFirstCommentWithValidPhone(
   customerName: string | null,
   phone: string
 ): Promise<void> {
-  const messages = loadMessages();
   let resolvedPsid: string | undefined;
   try {
     await sendTypingOn({ comment_id: commentId });
-    const text = formatPersonalizedMessage(messages.M5, customerName);
+    const { text } = await resolveIntentText({ kind: 'AI_PHONE_CONFIRMED' }, '', [], customerName, false);
     resolvedPsid = await sendText({ comment_id: commentId }, text);
   } catch (err) {
-    await logError('handleFeedChange_sendM5', err, { commentId, commenterId });
+    await logError('handleFeedChange_sendPhoneConfirmed', err, { commentId, commenterId });
     return;
   }
   if (!resolvedPsid) {
@@ -582,42 +607,44 @@ async function handleFirstCommentWithValidPhone(
 }
 
 /**
- * Comment đầu tiên có chuỗi số nhưng không hợp lệ -> M6 tương ứng, tuyệt đối không đụng Sheet
- * (mục 7 điểm 6, mục 8). Không đọc/ghi state Firestore ở nhánh này (M6 không làm chuyển state —
- * mục 5.2) nên không có rủi ro ghi đè; việc phải gửi M6 trước khi biết PSID có thể đã CLOSED hay
- * chưa là cùng 1 giới hạn kỹ thuật của Private Reply API đã chấp nhận ở mục 14.
+ * Comment đầu tiên có chuỗi số nhưng không hợp lệ -> AI viết lời nhắc theo đúng lỗi (thiếu/thừa/sai
+ * đầu số), tuyệt đối không đụng Sheet (mục 7 điểm 6, mục 8). Không đọc/ghi state Firestore ở nhánh
+ * này (số không hợp lệ không làm chuyển state — mục 5.2) nên không có rủi ro ghi đè; việc phải gửi
+ * lời nhắc trước khi biết PSID có thể đã CLOSED hay chưa là cùng 1 giới hạn kỹ thuật của Private
+ * Reply API đã chấp nhận ở mục 14.
  */
 async function handleFirstCommentWithInvalidPhone(
   commentId: string,
   commenterId: string,
-  errorMessageCode: MessageCode,
+  errorType: PhoneErrorType,
   customerName?: string | null
 ): Promise<void> {
-  const messages = loadMessages();
   try {
     await sendTypingOn({ comment_id: commentId });
-    const text = formatPersonalizedMessage(messages[errorMessageCode], customerName);
+    const { text } = await resolveIntentText(
+      { kind: 'AI_PHONE_INVALID', errorType },
+      '',
+      [],
+      customerName ?? null,
+      false
+    );
     const resolvedPsid = await sendText({ comment_id: commentId }, text);
     if (resolvedPsid) {
       await saveMappedPsid(commenterId, resolvedPsid);
     }
   } catch (err) {
-    await logError('handleFeedChange_sendM6', err, { commentId, commenterId });
+    await logError('handleFeedChange_sendPhoneInvalid', err, { commentId, commenterId });
   }
 }
 
 /**
- * Comment đầu tiên không có số điện thoại -> Private Reply M1→M2→M3 (mục 5.3). Facebook CHỈ trả
- * PSID sau khi đã gửi Private Reply đầu tiên qua comment_id — không có cách nào đọc trước để biết
- * PSID này đã từng chat trực tiếp (có thể đã IN_PROGRESS hay CLOSED) hay chưa. Chấp nhận gửi tối
- * thiểu 1 tin (M1) trước, rồi mới kiểm tra state thật để quyết định bước tiếp theo:
- * - `CLOSED` (đã có số hợp lệ) -> không gửi thêm M2/M3, không đổi state, nhưng vẫn theo dõi "hỏi
- *   lại" như kênh nhắn tin trực tiếp (copy nguyên trạng dòng lead cũ sang tab "Hỏi lại" — mục 6,
- *   8c) vì comment này không có số mới để sửa. Việc lỡ gửi M1 thay vì M7 là giới hạn kỹ thuật
- *   không tránh được của Private Reply API (mục 14), không phải lỗi logic.
- * - `NEW`/`IN_PROGRESS`/chưa từng có hội thoại -> tiếp tục gửi đủ M2, M3 để hoàn thành trọn bộ
- *   M1→M2→M3, dù là hỏi lần đầu hay "hỏi lại" khi đang IN_PROGRESS (mục 5.2/6, AC8/AC9) — không
- *   còn dừng giữa chừng ở M1 như hành vi cũ trước khi có quy tắc "hỏi lại".
+ * Comment đầu tiên của 1 người chưa từng phân giải PSID, không có số điện thoại (mục 5.3). Facebook
+ * CHỈ trả PSID sau khi đã gửi Private Reply đầu tiên qua comment_id — không có cách nào đọc trước để
+ * biết PSID này đã từng chat trực tiếp (có thể đã IN_PROGRESS hay CLOSED) hay chưa. Gửi 1 lời chào
+ * ngắn KHÔNG qua AI (`buildCommentGreeting`, tiết kiệm chi phí) làm tin PROBE để lấy PSID thật, rồi
+ * giao hẳn phần còn lại cho `handleMappedCommentTurn` — đúng luồng dùng chung với người đã có PSID
+ * (mục 5.3), tránh cài trùng logic xử lý NEW/IN_PROGRESS/CLOSED ở 2 nơi. `suppressGreeting=true` vì
+ * lời chào probe đã đóng vai trò đó rồi, tránh AI chào lần thứ 2 trong câu trả lời tiếp theo.
  */
 async function handleFirstCommentWithoutPhone(
   commentId: string,
@@ -625,14 +652,13 @@ async function handleFirstCommentWithoutPhone(
   customerName?: string | null,
   commentText = ''
 ): Promise<void> {
-  const messages = loadMessages();
   let resolvedPsid: string | undefined;
   try {
     await sendTypingOn({ comment_id: commentId });
-    const text = formatPersonalizedMessage(messages.M1, customerName);
+    const text = buildCommentGreeting(customerName ?? null);
     resolvedPsid = await sendText({ comment_id: commentId }, text);
   } catch (err) {
-    await logError('handleFeedChange_sendM1', err, { commentId, commenterId });
+    await logError('handleFeedChange_sendGreeting', err, { commentId, commenterId });
     return;
   }
 
@@ -645,65 +671,7 @@ async function handleFirstCommentWithoutPhone(
   }
 
   await saveMappedPsid(commenterId, resolvedPsid);
-
-  const existing = await getConversation(resolvedPsid);
-  if (existing && existing.state === 'CLOSED') {
-    if (existing.phone && isFollowUpDebounceElapsed(existing.lastFollowUpTrackedAt)) {
-      try {
-        await copyLeadToFollowUpSheet(existing.phone);
-        await touchFollowUpTracked(resolvedPsid);
-      } catch (err) {
-        await logError('followUpSheetTracking', err, { commentId, commenterId, resolvedPsid, phone: existing.phone });
-      }
-    }
-    return;
-  }
-
-  if (existing && existing.state === 'IN_PROGRESS') {
-    // Khách đã IN_PROGRESS từ trước (đã từng nhận M1-M3 qua tin nhắn): M1 vừa gửi để lấy PSID, chỉ
-    // cần AI trả lời câu hỏi mới trong comment rồi gửi thêm M3 (mục 4.2, thay vì luôn chỉ gửi M3).
-    try {
-      await delay(MIN_DELAY_BETWEEN_MESSAGES_MS);
-      let updatedAiHistory: AiHistoryEntry[] | undefined;
-      await sendMessageSequence({ comment_id: commentId }, ['AI_REPLY', 'M3'], true, customerName, async () => {
-        const { text, updatedHistory } = await resolveAiReplyText(commentText, existing.aiHistory ?? [], customerName ?? null);
-        updatedAiHistory = updatedHistory;
-        return text;
-      });
-      if (updatedAiHistory) {
-        await updateAiHistory(resolvedPsid, updatedAiHistory);
-      }
-    } catch (err) {
-      await logError('handleFeedChange_sendM3', err, { commentId, commenterId, resolvedPsid });
-    }
-    return;
-  }
-
-  try {
-    await delay(MIN_DELAY_BETWEEN_MESSAGES_MS);
-    // Tiếp tục dùng { comment_id } thay vì { id: resolvedPsid } (mục 5.3): Facebook chỉ cho phép gửi
-    // tin thường (recipient theo id) tới người đã chủ động mở cuộc trò chuyện — người mới chỉ comment
-    // (chưa từng nhắn tin) sẽ bị từ chối với lỗi 551/1545041 "Người này hiện không có mặt" nếu đổi
-    // sang { id }. Private Reply qua comment_id không bị giới hạn này.
-    // Mục 4.2: thay M2 cứng bằng AI trả lời đúng câu hỏi trong comment, rồi vẫn gửi M3.
-    let updatedAiHistory: AiHistoryEntry[] | undefined;
-    await sendMessageSequence({ comment_id: commentId }, ['AI_REPLY', 'M3'], true, customerName, async () => {
-      const { text, updatedHistory } = await resolveAiReplyText(commentText, [], customerName ?? null);
-      updatedAiHistory = updatedHistory;
-      return text;
-    });
-    await saveConversation(resolvedPsid, {
-      state: 'IN_PROGRESS',
-      phone: null,
-      assignedStaff: null,
-      customerName: customerName ?? null,
-    });
-    if (updatedAiHistory) {
-      await updateAiHistory(resolvedPsid, updatedAiHistory);
-    }
-  } catch (err) {
-    await logError('handleFeedChange_sendRest', err, { commentId, commenterId, resolvedPsid });
-  }
+  await handleMappedCommentTurn(resolvedPsid, commentId, commentText, customerName ?? null, true);
 }
 
 /**
@@ -760,12 +728,7 @@ async function handleFeedChange(value: FeedCommentValue, pageId?: string): Promi
     } else if (phoneCheck.valid && phoneCheck.normalizedPhone) {
       await handleFirstCommentWithValidPhone(commentId, commenterId, customerName, phoneCheck.normalizedPhone);
     } else if (phoneCheck.errorType !== null) {
-      await handleFirstCommentWithInvalidPhone(
-        commentId,
-        commenterId,
-        phoneErrorToMessage(phoneCheck.errorType),
-        customerName
-      );
+      await handleFirstCommentWithInvalidPhone(commentId, commenterId, phoneCheck.errorType, customerName);
     } else {
       await handleFirstCommentWithoutPhone(commentId, commenterId, customerName, commentText);
     }
