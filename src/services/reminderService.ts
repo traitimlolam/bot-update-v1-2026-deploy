@@ -7,7 +7,7 @@ import {
   updateConversationReminder,
   withLock,
 } from '../state/firestore';
-import { sendText, sendTypingOn } from '../webhook/facebook';
+import { Recipient, sendText, sendTypingOn } from '../webhook/facebook';
 
 export const LAND_TOUR_REMINDER_TEMPLATE =
   'Thứ 7 này em có xe đưa đón xem đất miễn phí, anh/chị có đi được không ạ?';
@@ -277,10 +277,18 @@ export async function runDailyReminderSweep(options?: {
         const customerName = candidate.customerName ?? current?.customerName ?? null;
         const text = formatPersonalizedMessage(LAND_TOUR_REMINDER_TEMPLATE, customerName);
 
+        // Khách CHỈ MỚI bình luận, chưa từng chủ động nhắn tin trực tiếp -> Facebook Send API từ
+        // chối gửi tin thường theo {id: psid} (lỗi 551/1545041 "người này hiện không có mặt") —
+        // phải gửi qua {comment_id} (Private Reply) giống hệt cách webhook/facebook.ts đã xử lý cho
+        // nhóm này (mục 5.3/5.4). `lastCommentId` chỉ còn giá trị khi lượt gần nhất của khách là 1
+        // bình luận; nếu khách từng nhắn tin trực tiếp dù chỉ 1 lần, field này đã tự được xoá về
+        // null (xem `runFlowTurn`), nên mặc định {id: psid} vẫn đúng cho đa số khách hàng.
+        const recipient: Recipient = current?.lastCommentId ? { comment_id: current.lastCommentId } : { id: psid };
+
         if (!options?.dryRun) {
           await withLock(`psid:${psid}`, async () => {
-            await sendTypingOn({ id: psid });
-            await sendText({ id: psid }, text);
+            await sendTypingOn(recipient);
+            await sendText(recipient, text);
 
             await updateConversationReminder(psid, {
               state: current?.state ?? 'IN_PROGRESS',

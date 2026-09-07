@@ -11,6 +11,7 @@ jest.mock('../src/state/firestore', () => ({
   saveConversation: jest.fn().mockResolvedValue(undefined),
   touchFollowUpTracked: jest.fn().mockResolvedValue(undefined),
   updateAiHistory: jest.fn().mockResolvedValue(undefined),
+  setLastCommentId: jest.fn().mockResolvedValue(undefined),
   logError: jest.fn().mockResolvedValue(undefined),
   getDb: jest.fn(() => ({
     collection: jest.fn(() => ({
@@ -35,7 +36,14 @@ jest.mock('../src/ai/geminiService', () => ({
   generateAiReply: jest.fn().mockResolvedValue('Đây là câu trả lời AI mẫu.'),
 }));
 
-import { getConversation, saveConversation, touchFollowUpTracked, updateAiHistory, logError } from '../src/state/firestore';
+import {
+  getConversation,
+  saveConversation,
+  touchFollowUpTracked,
+  updateAiHistory,
+  setLastCommentId,
+  logError,
+} from '../src/state/firestore';
 import {
   appendLead,
   copyLeadToFollowUpSheet,
@@ -48,6 +56,7 @@ const mockedGetConversation = getConversation as jest.Mock;
 const mockedSaveConversation = saveConversation as jest.Mock;
 const mockedTouchFollowUpTracked = touchFollowUpTracked as jest.Mock;
 const mockedUpdateAiHistory = updateAiHistory as jest.Mock;
+const mockedSetLastCommentId = setLastCommentId as jest.Mock;
 const mockedLogError = logError as jest.Mock;
 const mockedAppendLead = appendLead as jest.Mock;
 const mockedCopyLeadToFollowUpSheet = copyLeadToFollowUpSheet as jest.Mock;
@@ -317,6 +326,23 @@ describe('runFlowTurn: appendLead chỉ được gọi khi số điện thoại 
     for (const body of sentBodies) {
       expect(body.recipient).toEqual({ comment_id: 'CMT_456' });
     }
+  });
+
+  it('runFlowTurn từ 1 lượt bình luận -> lưu lại lastCommentId để reminderService dùng {comment_id} sau này (mục 5.3/5.4)', async () => {
+    await runFlowTurn(
+      'PSID_TEST',
+      { type: 'FEED_COMMENT', text: 'cho em hoi gia' },
+      async () => 'Khách A',
+      { comment_id: 'CMT_456' }
+    );
+
+    expect(mockedSetLastCommentId).toHaveBeenCalledWith('PSID_TEST', 'CMT_456');
+  });
+
+  it('runFlowTurn từ 1 lượt nhắn tin trực tiếp -> xoá lastCommentId về null (đã chứng minh {id} gửi được)', async () => {
+    await runFlowTurn('PSID_TEST', { type: 'TEXT', text: 'cho em hoi gia' }, async () => 'Khách A');
+
+    expect(mockedSetLastCommentId).toHaveBeenCalledWith('PSID_TEST', null);
   });
 
   it('handleFeedChange sau khi xử lý comment xong -> tự động gọi Graph API ẩn comment (is_hidden=true)', async () => {

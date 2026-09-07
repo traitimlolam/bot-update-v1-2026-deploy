@@ -17,6 +17,7 @@ import {
   getDb,
   logError,
   saveConversation,
+  setLastCommentId,
   StoredConversation,
   touchFollowUpTracked,
   updateAiHistory,
@@ -265,6 +266,10 @@ export async function runFlowTurn(
     // ngoài đã tự gửi 1 lời chào riêng trước đó trong CÙNG lượt xử lý (vd probe PSID qua comment_id,
     // mục 5.3) để tránh AI chào lần thứ 2 chồng lên lời chào vừa gửi.
     const isNewCustomer = !suppressGreeting && current.state === 'NEW';
+    // `commentId` khác null khi lượt này đến từ 1 bình luận (mục 5.3) — dùng để chọn recipient khi
+    // gửi (giữ nguyên comment_id cho MỌI tin, xem `sendMessageSequence`) VÀ để lưu lại `lastCommentId`
+    // cho `services/reminderService.ts` fallback đúng kiểu recipient khi gửi tin nhắc 20h (mục 5.4).
+    const commentId = overrideRecipient && 'comment_id' in overrideRecipient ? overrideRecipient.comment_id : null;
     const result = processInput(current, input);
 
     // Lấy tên khách để xưng hô chuẩn xác: ưu tiên tên đã lưu trong session, nếu chưa có thì fetch
@@ -276,7 +281,7 @@ export async function runFlowTurn(
     if (result.messagesToSend.length > 0) {
       try {
         const targetRecipient: Recipient = overrideRecipient ?? { id: psid };
-        const keepOriginal = overrideRecipient !== undefined && 'comment_id' in overrideRecipient;
+        const keepOriginal = commentId !== null;
 
         // mục 4.2: đọc userText từ chính `input` của lượt này (TEXT/FEED_COMMENT) — dùng chung cho
         // bất kỳ ReplyIntent nào xuất hiện trong messagesToSend (flowEngine chỉ bao giờ đặt tối đa 1).
@@ -369,6 +374,15 @@ export async function runFlowTurn(
       await saveConversation(psid, finalRecord);
     } catch (err) {
       await logError('saveConversation', err, { psid, finalRecord });
+    }
+
+    // mục 5.4: ghi lại kênh của lượt này để reminderService chọn đúng kiểu recipient khi gửi tin
+    // nhắc 20h — comment_id thật nếu lượt này là bình luận, null nếu là nhắn tin trực tiếp (đã tự
+    // chứng minh {id: psid} gửi được).
+    try {
+      await setLastCommentId(psid, commentId);
+    } catch (err) {
+      await logError('setLastCommentId', err, { psid, commentId });
     }
   });
 }

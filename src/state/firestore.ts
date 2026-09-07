@@ -59,6 +59,15 @@ export interface StoredConversation extends ConversationRecord {
   lastFollowUpTrackedAt?: Timestamp | null;
   /** Lịch sử hội thoại ngắn dùng làm ngữ cảnh cho AI trả lời tự do (mục 4.2). */
   aiHistory?: AiHistoryEntry[];
+  /**
+   * `comment_id` của lượt tương tác GẦN NHẤT nếu đó là 1 lượt bình luận (mục 5.3) — `null` nếu lượt
+   * gần nhất là nhắn tin trực tiếp. Facebook Send API từ chối gửi tin thường theo `{id: psid}`
+   * (lỗi 551/1545041 "người này hiện không có mặt") cho người CHỈ MỚI bình luận, chưa từng chủ động
+   * nhắn tin trực tiếp — phải gửi qua `{comment_id}` (Private Reply) như `webhook/facebook.ts` đã
+   * làm. `services/reminderService.ts` (mục 5.4) đọc field này để chọn đúng kiểu recipient khi gửi
+   * tin nhắc 20h cho nhóm khách này thay vì luôn mặc định `{id: psid}`.
+   */
+  lastCommentId?: string | null;
 }
 
 const CONVERSATIONS_COLLECTION = 'conversations';
@@ -104,6 +113,17 @@ export async function touchFollowUpTracked(psid: string): Promise<void> {
       .collection(CONVERSATIONS_COLLECTION)
       .doc(psid)
       .set({ lastFollowUpTrackedAt: Timestamp.now() }, { merge: true })
+  );
+}
+
+/**
+ * Cập nhật `lastCommentId` sau MỖI lượt xử lý (mục 5.3/5.4) — truyền `commentId` thật nếu lượt này
+ * là 1 bình luận, hoặc `null` nếu là 1 lượt nhắn tin trực tiếp (đã tự chứng minh `{id: psid}` gửi
+ * được, không cần fallback qua comment_id nữa). Ghi riêng field này bằng `merge: true`.
+ */
+export async function setLastCommentId(psid: string, commentId: string | null): Promise<void> {
+  await withRetry(() =>
+    getDb().collection(CONVERSATIONS_COLLECTION).doc(psid).set({ lastCommentId: commentId }, { merge: true })
   );
 }
 

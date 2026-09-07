@@ -210,6 +210,37 @@ describe('reminderService: Rà soát & gửi tin nhắn nhắc lúc 20h hàng ng
       expect(mockedSendText).not.toHaveBeenCalledWith({ id: 'PSID_ALREADY_SENT' }, expect.any(String));
     });
 
+    it('khách chỉ mới bình luận (có lastCommentId) -> gửi tin nhắc qua {comment_id}, không dùng {id} (mục 5.3/5.4)', async () => {
+      mockedGetConversation.mockImplementation(async (psid: string) => {
+        if (psid === 'PSID_MALE') {
+          return {
+            state: 'IN_PROGRESS',
+            phone: null,
+            customerName: 'Nguyễn Trọng Hiếu',
+            lastCommentId: 'CMT_LATEST_789',
+          };
+        }
+        if (psid === 'PSID_FEMALE') {
+          // Đã từng nhắn tin trực tiếp -> lastCommentId đã bị xoá về null, vẫn gửi qua {id} bình thường.
+          return { state: 'NEW', phone: null, customerName: 'Trần Hương', lastCommentId: null };
+        }
+        return null;
+      });
+
+      await runDailyReminderSweep();
+
+      expect(mockedSendText).toHaveBeenCalledWith(
+        { comment_id: 'CMT_LATEST_789' },
+        'Thứ 7 này em có xe đưa đón xem đất miễn phí, anh có đi được không ạ?'
+      );
+      expect(mockedSendText).not.toHaveBeenCalledWith({ id: 'PSID_MALE' }, expect.any(String));
+
+      expect(mockedSendText).toHaveBeenCalledWith(
+        { id: 'PSID_FEMALE' },
+        'Thứ 7 này em có xe đưa đón xem đất miễn phí, chị có đi được không ạ?'
+      );
+    });
+
     it('dùng CHUNG 1 khoá theo ngày dù chạy force hay không, để 2 sweep không bao giờ chạy song song', async () => {
       mockedGetConversation.mockResolvedValue(null);
       const { todayStr } = getVietnamDateRange();
