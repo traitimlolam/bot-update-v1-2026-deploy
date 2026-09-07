@@ -13,6 +13,14 @@ import { PhoneErrorType } from '../flow/phoneValidator';
 const ROUTER_BASE_URL = process.env.AI_ROUTER_URL || 'http://100.93.163.100:20128/v1';
 const MODEL_NAME = process.env.AI_MODEL_NAME || 'ag/gemini-3.8-flash-high';
 
+/**
+ * Tuỳ chọn — chỉ cần set khi endpoint router (vd IP public của VM qua firewall mở riêng) có đặt lớp
+ * xác thực API key để tránh bị người lạ gọi trộm. Khi có giá trị, gửi kèm header
+ * `Authorization: Bearer <key>`; khi để trống (mặc định, đúng với router qua Tailscale nội bộ),
+ * không gửi header này.
+ */
+const ROUTER_API_KEY = process.env.AI_ROUTER_API_KEY;
+
 export type AiHistoryRole = 'user' | 'model';
 
 export interface AiHistoryTurn {
@@ -176,6 +184,7 @@ export async function generateAiReply(params: GenerateAiReplyParams): Promise<st
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...(ROUTER_API_KEY ? { Authorization: `Bearer ${ROUTER_API_KEY}` } : {}),
       },
       body: JSON.stringify({
         model: MODEL_NAME,
