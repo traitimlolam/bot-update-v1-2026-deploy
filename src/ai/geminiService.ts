@@ -1,14 +1,13 @@
-import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { AREA_KNOWLEDGE_BASE } from '../config/knowledgeBase';
 import { analyzeVietnameseName } from '../utils/genderDetector';
 import { withRetry } from '../util/retry';
 
 /**
- * Model dùng cho lớp trả lời tự do (mục 4.2 CLAUDE.md): Gemini Developer API qua Google AI Studio
- * (KHÔNG phải Vertex AI), chạy trong hạn mức free tier. Cố tình chọn thẳng dòng 3.x (không phải
- * 2.5) vì dòng 2.5 sẽ ngừng hoạt động 16/10/2026 — tránh phải migrate lại ngay sau khi go-live.
+ * Model và Endpoint bộ não máy chủ 9Router qua mạng Tailscale (ag/gemini-3.8-flash-high)
+ * Không giới hạn 20 lượt/ngày, xoay vòng tài khoản Google Pro hạn mức hàng nghìn lượt/ngày.
  */
-const MODEL_NAME = 'gemini-3.5-flash';
+const ROUTER_BASE_URL = process.env.AI_ROUTER_URL || 'http://100.93.163.100:20128/v1';
+const MODEL_NAME = process.env.AI_MODEL_NAME || 'ag/gemini-3.8-flash-high';
 
 export type AiHistoryRole = 'user' | 'model';
 
@@ -17,20 +16,9 @@ export interface AiHistoryTurn {
   text: string;
 }
 
-let client: GoogleGenAI | undefined;
-
-function getClient(): GoogleGenAI {
-  if (!client) {
-    client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-  }
-  return client;
-}
-
 /**
- * Dựng system instruction (hàm thuần, không gọi API — mục 4.2/13): nhúng đúng `knowledgeBase.ts`
- * làm nguồn dữ kiện DUY NHẤT AI được phép dùng, kèm quy tắc xưng hô đúng theo mục 4.1 (tái dùng
- * `analyzeVietnameseName`, không qua `formatPersonalizedMessage` vì đó chỉ thay thế đúng chuỗi mẫu
- * cố định, không áp dụng được lên văn bản AI tự sinh). Không nhận/không nhúng số điện thoại khách.
+ * Dựng system instruction (hàm thuần, không gọi API): nhúng đúng `knowledgeBase.ts`
+ * làm nguồn dữ kiện DUY NHẤT AI được phép dùng, kèm quy tắc xưng hô.
  */
 export function buildSystemInstruction(customerName: string | null): string {
   const { gender, callName } = analyzeVietnameseName(customerName);
@@ -73,38 +61,44 @@ export interface GenerateAiReplyParams {
 }
 
 /**
- * Gọi Gemini Developer API sinh câu trả lời tự do (mục 4.2) — lớp mỏng gọi API bên ngoài, chỉ test
- * thủ công (mục 3), bọc `withRetry` như mọi lời gọi ra ngoài khác (mục 10). Ném lỗi ra ngoài khi hết
- * số lần retry hoặc model trả về rỗng — lớp gọi ngoài (`webhook/facebook.ts`) chịu trách nhiệm bắt
- * lỗi này và fallback về M2 (mục 4.2, AC16), không được để khách không nhận được tin nào.
+ * Gọi bộ não 9Router máy chủ qua OpenAI-compatible API
  */
 export async function generateAiReply(params: GenerateAiReplyParams): Promise<string> {
   const { userMessage, history, customerName } = params;
 
   return withRetry(async () => {
-    const response = await getClient().models.generateContent({
-      model: MODEL_NAME,
-      contents: [
-        ...history.map((turn) => ({ role: turn.role, parts: [{ text: turn.text }] })),
-        { role: 'user' as const, parts: [{ text: userMessage }] },
-      ],
-      config: {
-        systemInstruction: buildSystemInstruction(customerName),
-        temperature: 0.4,
-        maxOutputTokens: 500,
-        // Ép mức "thinking" (suy luận nội bộ) xuống MINIMAL (mục 4.2, tối giản chi phí): đã kiểm
-        // chứng thủ công — `thinkingBudget: 0` KHÔNG có tác dụng với gemini-3.5-flash (model vẫn tự
-        // trích ~280 token cho thinking bất kể), trong khi `thinkingLevel: 'MINIMAL'` mới thực sự bỏ
-        // qua bước này. Nếu không set, thinking từng chiếm gần hết maxOutputTokens và cắt cụt câu trả
-        // lời giữa chừng (finishReason: MAX_TOKENS) — với câu trả lời tư vấn ngắn (1-3 câu) không cần
-        // suy luận nhiều bước, MINIMAL vừa tránh lỗi này vừa giảm token phải trả phí mỗi lượt.
-        thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
+    const messages = [
+      { role: 'system', content: buildSystemInstruction(customerName) },
+      ...history.map((turn) => ({
+        role: turn.role === 'model' ? 'assistant' : 'user',
+        content: turn.text,
+      })),
+      { role: 'user', content: userMessage },
+    ];
+
+    const response = await fetch(`${ROUTER_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
       },
+      body: JSON.stringify({
+        model: MODEL_NAME,
+        messages,
+        temperature: 0.4,
+        max_tokens: 500,
+        stream: false,
+      }),
     });
 
-    const text = response.text?.trim();
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      throw new Error(`AI Router returned HTTP ${response.status}: ${errText}`);
+    }
+
+    const data = (await response.json()) as any;
+    const text = data?.choices?.[0]?.message?.content?.trim();
     if (!text) {
-      throw new Error('Gemini trả về nội dung rỗng');
+      throw new Error('AI Router trả về nội dung rỗng');
     }
     return text;
   });

@@ -1,0 +1,22 @@
+{
+  "object": "page",
+  "entry": [
+    {
+      "id": "PAGE_ID",
+      "time": 1700000000000,
+      "changes": [
+        {
+          "field": "feed",
+          "value": {
+            "item": "comment",
+            "verb": "add",
+            "comment_id": "COMMENT_ID_67890",
+            "post_id": "PAGE_ID_POST_1",
+            "from": { "id": "COMMENTER_ID_555", "name": "Khách Hàng Mẫu" },
+            "message": "Cho em hỏi giá bao nhiêu ạ"
+          }
+        }
+      ]
+    }
+  ]
+}

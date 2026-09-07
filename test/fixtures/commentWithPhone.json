@@ -1,0 +1,22 @@
+{
+  "object": "page",
+  "entry": [
+    {
+      "id": "PAGE_ID",
+      "time": 1700000000000,
+      "changes": [
+        {
+          "field": "feed",
+          "value": {
+            "item": "comment",
+            "verb": "add",
+            "comment_id": "COMMENT_ID_67891",
+            "post_id": "PAGE_ID_POST_1",
+            "from": { "id": "COMMENTER_ID_556", "name": "Nguyễn Văn A" },
+            "message": "Chị cho em xin sđt 0912345678 để tư vấn thêm nhé"
+          }
+        }
+      ]
+    }
+  ]
+}
