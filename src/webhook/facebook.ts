@@ -15,9 +15,11 @@ import {
   AiHistoryEntry,
   getConversation,
   getDb,
+  isHumanTakeoverActive,
   logError,
   saveConversation,
   setLastCommentId,
+  setLastHumanReplyAt,
   StoredConversation,
   touchFollowUpTracked,
   updateAiHistory,
@@ -472,7 +474,14 @@ export async function runFlowTurn(
 
 interface MessagingEvent {
   sender: { id: string };
-  message?: { text?: string; quick_reply?: { payload?: string }; is_echo?: boolean };
+  recipient?: { id: string };
+  message?: {
+    mid?: string;
+    text?: string;
+    quick_reply?: { payload?: string };
+    is_echo?: boolean;
+    app_id?: number | string;
+  };
   postback?: { payload?: string };
 }
 
@@ -586,6 +595,13 @@ async function fetchCustomerName(psid: string): Promise<string | null> {
 async function handleMessagingEvent(event: MessagingEvent): Promise<void> {
   const psid = event.sender.id;
 
+  // Kiểm tra Human Takeover (nhường người thật chat trong vòng 10 phút)
+  const conversation = await getConversation(psid);
+  if (isHumanTakeoverActive(conversation?.lastHumanReplyAt)) {
+    console.log(`[humanTakeover] Bot giữ im lặng 100% vì nhân viên đang chat trực tiếp với PSID ${psid}`);
+    return;
+  }
+
   if (event.postback?.payload === 'GET_STARTED') {
     // Khách mở cửa sổ chat lần đầu (mục 5.1) -> gửi tin có 3 quick-reply button, chưa chạy flowEngine.
     await handleFirstOpen(psid);
@@ -695,6 +711,11 @@ async function handleMappedCommentTurn(
   commentText: string,
   customerName: string | null
 ): Promise<void> {
+  const existing = await getConversation(psid);
+  if (isHumanTakeoverActive(existing?.lastHumanReplyAt)) {
+    console.log(`[humanTakeover] Bỏ qua comment vì nhân viên đang chat trực tiếp với PSID ${psid}`);
+    return;
+  }
   await runFlowTurn(psid, { type: 'FEED_COMMENT', text: commentText }, async () => customerName, {
     comment_id: commentId,
   });
@@ -992,7 +1013,21 @@ export async function handleWebhookEvent(req: Request, res: Response): Promise<v
       for (const event of entry.messaging ?? []) {
         try {
           if (!event.message && !event.postback) continue;
-          if (event.message?.is_echo) continue;
+
+          // Bắt sự kiện tin nhắn từ Page (is_echo === true):
+          // Khi nhân viên/admin dùng nick Page nhắn cho khách, cập nhật lastHumanReplyAt = Date.now() vào Firestore
+          if (event.message?.is_echo) {
+            const customerPsid = event.recipient?.id;
+            const botAppId = process.env.FB_APP_ID || "2090780494853003";
+            const isBotSelf = event.message.app_id && String(event.message.app_id) === String(botAppId);
+            if (customerPsid && !isBotSelf) {
+              await setLastHumanReplyAt(customerPsid, Date.now()).catch((err: unknown) =>
+                logError("setLastHumanReplyAt", err, { customerPsid })
+              );
+            }
+            continue;
+          }
+
           // Ngăn ngừa mọi nguy cơ lặp tin nếu tin nhắn đến từ chính Page ID
           if (pageId && event.sender.id === pageId) continue;
           await handleMessagingEvent(event);

@@ -67,11 +67,12 @@ MỤC ĐÍCH CUỐI CÙNG của mọi câu trả lời KHÔNG PHẢI là giải 
 - Tin nhắn 1: Trả lời thẳng, ngắn gọn đúng trọng tâm câu hỏi của khách (vị trí, giá, pháp lý).
 - Tin nhắn 2: Gợi mở hoặc hỗ trợ bước tiếp theo.
 
-2. Quy tắc xin số điện thoại khéo léo:
+2. Quy tắc xin số điện thoại khéo léo & tiết chế tần suất (giống người thật 100%):
+- Trong TOÀN BỘ cuộc trò chuyện, bot CHỈ ĐƯỢC XIN SỐ TỐI ĐA 1 ĐẾN 2 LẦN. Tuyệt đối không câu nào cũng gài câu xin số khiến khách cảm thấy bị làm phiền, gượng gạo và vồ vập.
+- Khi khách đang hỏi về các thông tin cơ bản (vị trí ở đâu, giá bán thế nào, đường đi ra sao, pháp lý sổ sách): Bot CHỈ tập trung giải đáp nhiệt tình, ngắn gọn, đi thẳng vào câu hỏi của khách, TUYỆT ĐỐI KHÔNG gài thêm câu xin số ở mọi lượt chat.
+- CHỈ KHI NÀO khách thể hiện sự quan tâm sâu sắc (ví dụ: muốn xem bảng giá chi tiết từng lô, muốn xem sơ đồ phân lô, hỏi thủ tục công chứng sang tên, hoặc hỏi xem đất thực tế): Bot mới đưa ra 1 lý do chính đáng và mang lại lợi ích cụ thể cho khách để mời khách để lại số Zalo/điện thoại gửi tài liệu qua.
+- NẾU Ở LƯỢT CHAT TRƯỚC bot đã xin số mà khách lờ đi và hỏi sang câu khác: Ở lượt này bot TUYỆT ĐỐI KHÔNG ĐƯỢC XIN LẠI NỮA, chỉ tập trung giải đáp chu đáo câu hỏi mới của khách.
 - Không được vồ vập, không hỏi xin số cộc lốc kiểu "cho em xin số điện thoại".
-- Phải giải quyết thắc mắc của khách trước, sau đó mới đưa ra một lý do chính đáng và mang lại lợi ích cho khách để xin số Zalo (ví dụ: gửi sơ đồ phân lô, bảng giá chi tiết từng lô, hình ảnh thực tế, định vị chính xác).
-- Ví dụ câu xin số khéo léo: "Em có gửi sẵn sơ đồ phân lô và bảng giá chi tiết từng lô, anh/chị cho em xin số Zalo để em gửi qua cho mình tiện mở xem trên điện thoại nhé."
-- Nếu khách đang hỏi dở hoặc chưa muốn cho số, không được giục giã dồn dập, chỉ tập trung tư vấn nhiệt tình, nhã nhặn.
 - Việc CÓ mời khách để lại số điện thoại/Zalo hay không, và mời như thế nào, PHẢI làm ĐÚNG theo hướng dẫn nêu trong phần "Sự kiện" ở tin nhắn cuối cùng — không tự ý thêm lời mời để lại số nếu "Sự kiện" không yêu cầu, và không được quên nếu "Sự kiện" yêu cầu bắt buộc.
 
 3. Giọng điệu và xưng hô:
@@ -85,6 +86,12 @@ MỤC ĐÍCH CUỐI CÙNG của mọi câu trả lời KHÔNG PHẢI là giải 
 4. Nguyên tắc dữ kiện:
 - CHỈ được dùng đúng các dữ kiện trong phần "THÔNG TIN DỰ ÁN" dưới đây để trả lời. Tuyệt đối không tự đoán mò hay bịa thêm giá, pháp lý, vị trí, tiện ích, hay cam kết nào không có trong đó.
 - Nếu câu hỏi của khách nằm ngoài các dữ kiện có sẵn bên dưới, trả lời khéo léo rằng sẽ nhờ chuyên viên phụ trách liên hệ trao đổi chi tiết hơn với khách, không đoán mò hay bịa thông tin.
+
+5. Chống trả lời trùng lặp & giữ nhịp hội thoại tự nhiên:
+- Đối chiếu kỹ các tin nhắn bot đã gửi trong lịch sử hội thoại gần nhất (aiHistory):
+  + Tuyệt đối không lặp lại cùng một kiểu mở đầu câu, không dùng lại các câu chào xã giao nếu đã chào trước đó (chỉ chào một lần ở tin nhắn đầu tiên, từ tin thứ 2 trở đi đi thẳng vào vấn đề).
+  + Tuyệt đối không dùng lại y nguyên các câu từ, cấu trúc câu hoặc công thức của lượt chat trước.
+  + Thay đổi linh hoạt cách diễn đạt, từ ngữ xưng hô và ngắt nhịp để cuộc trò chuyện luôn tự nhiên, sinh động và chân thực như một người tư vấn thật đang nhắn tin qua lại.
 
 THÔNG TIN DỰ ÁN:
 ${AREA_KNOWLEDGE_BASE}`;
@@ -113,7 +120,7 @@ const GREETING_HINT =
  * AI_FREE_TEXT.
  */
 const PHONE_CTA_HINT =
-  'Quy tắc xin số: Khi câu hỏi phù hợp để gửi thêm tài liệu (bảng giá chi tiết, vị trí chính xác, sơ đồ phân lô, hình ảnh thực tế), hãy khéo léo mời khách để lại số Zalo/điện thoại để bên em gửi qua. TUY NHIÊN, nếu trong các câu chat gần nhất bot đã từng mời xin số rồi hoặc khách đang hỏi dở chi tiết khác mà chưa muốn cho số, TUYỆT ĐỐI KHÔNG lặp lại câu xin số dồn dập ở lượt này — chỉ tập trung trả lời đúng trọng tâm và gợi mở bước tiếp theo một cách nhã nhặn.';
+  'Quy tắc xin số: Khi khách hỏi sâu hoặc câu hỏi phù hợp để gửi thêm tài liệu (bảng giá chi tiết, sơ đồ phân lô, xem đất thực tế), hãy khéo léo mời khách để lại số Zalo/điện thoại để bên em gửi qua. TUY NHIÊN: Nếu khách chỉ hỏi thông tin cơ bản, hoặc trong các câu chat gần nhất bot đã từng xin số mà khách lờ đi hỏi câu khác, TUYỆT ĐỐI KHÔNG xin lại số dồn dập ở lượt này — chỉ tập trung trả lời đúng trọng tâm câu hỏi mới và giải đáp nhiệt tình, tự nhiên.';
 
 /**
  * Dịch 1 `ReplyIntent` (mục 4.2 mở rộng, `flow/flowEngine.ts`) + ngữ cảnh của lượt hiện tại thành
@@ -169,13 +176,35 @@ export async function generateAiReply(params: GenerateAiReplyParams): Promise<st
   const { intent, userText, history, customerName, isNewCustomer, knownGender } = params;
 
   return withRetry(async () => {
+    // Phân tích lịch sử hội thoại để kiểm soát tần suất xin số & chống lặp:
+    const phoneAskCount = history.filter(
+      (h) => h.role === 'model' && /(số zalo|số điện thoại|sđt|inbox số|gửi số|để lại số)/i.test(h.text)
+    ).length;
+
+    const lastModelTurn = [...history].reverse().find((h) => h.role === 'model');
+    const lastAskedPhone = lastModelTurn && /(số zalo|số điện thoại|sđt|gửi số|để lại số)/i.test(lastModelTurn.text);
+    const alreadyGreeted = history.some(
+      (h) => h.role === 'model' && /(xin chào|chào anh|chào chị|em chào)/i.test(h.text)
+    );
+
+    let historyGuidance = '';
+    if (alreadyGreeted || !isNewCustomer) {
+      historyGuidance += ' [QUY TẮC CHỐNG LẶP: Bot đã chào khách ở các lượt trước, tuyệt đối KHÔNG chào lại, không mở đầu bằng câu chào xã giao, đi thẳng vào câu trả lời.]';
+    }
+
+    if (phoneAskCount >= 2) {
+      historyGuidance += ' [QUY TẮC XIN SỐ: Bot đã xin số đủ 2 lần trong cuộc hội thoại. Ở lượt này TUYỆT ĐỐI KHÔNG xin số nữa, chỉ tập trung giải đáp câu hỏi.]';
+    } else if (lastAskedPhone) {
+      historyGuidance += ' [QUY TẮC XIN SỐ: Lượt trước bot đã xin số nhưng khách chưa cho và hỏi nội dung khác. Lượt này TUYỆT ĐỐI KHÔNG XIN LẠI SỐ, chỉ trả lời câu hỏi mới của khách.]';
+    }
+
     const messages = [
       { role: 'system', content: buildSystemInstruction(customerName, knownGender) },
       ...history.map((turn) => ({
         role: turn.role === 'model' ? 'assistant' : 'user',
         content: turn.text,
       })),
-      { role: 'user', content: describeIntent(intent, userText, isNewCustomer) },
+      { role: 'user', content: describeIntent(intent, userText, isNewCustomer) + historyGuidance },
     ];
 
     const response = await fetch(`${ROUTER_BASE_URL}/chat/completions`, {

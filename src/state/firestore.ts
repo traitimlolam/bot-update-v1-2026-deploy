@@ -68,6 +68,11 @@ export interface StoredConversation extends ConversationRecord {
    * tin nhắc 20h cho nhóm khách này thay vì luôn mặc định `{id: psid}`.
    */
   lastCommentId?: string | null;
+  /**
+   * Mốc thời gian (ms) gần nhất nhân viên/admin dùng nick Page nhắn trực tiếp cho khách (mục Human Takeover).
+   * Dùng để tạm ngưng bot trong 10 phút, tránh chen ngang khi người thật đang tư vấn.
+   */
+  lastHumanReplyAt?: number | Timestamp | null;
 }
 
 const CONVERSATIONS_COLLECTION = 'conversations';
@@ -237,4 +242,33 @@ export async function logError(context: string, error: unknown, meta?: Record<st
     console.error('[logError] failed to persist error to Firestore', loggingError);
     console.error(`[${context}]`, message, meta ?? '');
   }
+}
+
+export const HUMAN_TAKEOVER_TIMEOUT_MS = 10 * 60 * 1000; // 10 phút
+
+/**
+ * Cập nhật mốc thời gian nhân viên Page vừa nhắn cho khách (is_echo === true).
+ */
+export async function setLastHumanReplyAt(psid: string, timestampMs: number = Date.now()): Promise<void> {
+  await withRetry(() =>
+    getDb()
+      .collection(CONVERSATIONS_COLLECTION)
+      .doc(psid)
+      .set({ lastHumanReplyAt: timestampMs }, { merge: true })
+  );
+}
+
+/**
+ * Kiểm tra xem chế độ Human Takeover có đang kích hoạt không (chưa quá 10 phút kể từ lúc nhân viên nhắn).
+ */
+export function isHumanTakeoverActive(lastHumanReplyAt?: number | Timestamp | null): boolean {
+  if (!lastHumanReplyAt) return false;
+  const lastMs =
+    typeof lastHumanReplyAt === "number"
+      ? lastHumanReplyAt
+      : lastHumanReplyAt instanceof Timestamp
+      ? lastHumanReplyAt.toMillis()
+      : (lastHumanReplyAt as any)?.toMillis?.() || 0;
+  if (!lastMs) return false;
+  return Date.now() - lastMs < HUMAN_TAKEOVER_TIMEOUT_MS;
 }
