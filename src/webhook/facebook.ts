@@ -14,6 +14,7 @@ import {
 import { checkPhone, PhoneErrorType } from '../flow/phoneValidator';
 import {
   AiHistoryEntry,
+  checkAndSaveMidInFirestore,
   getConversation,
   getDb,
   isHumanTakeoverActive,
@@ -21,6 +22,7 @@ import {
   saveConversation,
   setLastCommentId,
   setLastHumanReplyAt,
+  setLastProcessedMessageAt,
   StoredConversation,
   touchFollowUpTracked,
   updateAiHistory,
@@ -45,42 +47,82 @@ const processedMids = new Map<string, number>();
 const lastProcessedAtByPsid = new Map<string, number>();
 
 /**
- * Kiểm tra xem message_id (mid) đã từng được tiếp nhận chưa (chống Meta retry do timeout).
- * Tự động xoá cache các mid cũ hơn 10 phút.
+ * Kiểm tra mã tin nhắn: Mỗi tin nhắn từ Facebook đều có message.mid duy nhất.
+ * Lưu mid vào bộ nhớ đệm và Firestore. Nếu mid đã tồn tại thì return true (bỏ qua ngay lập tức).
  */
-export function isDuplicateMid(mid?: string): boolean {
+export async function isDuplicateMid(mid?: string): Promise<boolean> {
   if (!mid) return false;
   const now = Date.now();
+
+  // 1. Kiểm tra nhanh trong memory cache
+  if (processedMids.has(mid)) {
+    return true;
+  }
+  processedMids.set(mid, now);
+
   if (processedMids.size > 5000) {
     for (const [key, time] of processedMids.entries()) {
       if (now - time > 10 * 60 * 1000) processedMids.delete(key);
     }
   }
-  if (processedMids.has(mid)) {
+
+  if (process.env.NODE_ENV === 'test') {
+    return false;
+  }
+
+  // 2. Kiểm tra và ghi nhận trong Firestore (chia sẻ giữa các Cloud Run container instances)
+  const isDuplicateInDb = await checkAndSaveMidInFirestore(mid);
+  if (isDuplicateInDb) {
     return true;
   }
-  processedMids.set(mid, now);
+
   return false;
 }
 
 /**
- * Kiểm tra debounce theo PSID (chống Meta bắn đồng thời 2-3 webhook khi bấm quảng cáo).
- * Nếu cùng một PSID gửi nhiều sự kiện trong vòng debounceMs (mặc định 3000ms), lập tức bỏ qua.
+ * Khóa chống trùng theo thời gian (Debounce 4 giây):
+ * Trong Firestore, ghi nhận lastProcessedMessageAt = Date.now().
+ * Nếu có một sự kiện mới đến từ cùng 1 PSID trong vòng 4 giây kể từ tin trước, lập tức bỏ qua (return ngay).
  */
-export function isPsidDebounced(psid: string, debounceMs: number = 3000): boolean {
+export async function isPsidDebounced(psid: string, debounceMs: number = 4000): Promise<boolean> {
   if (!psid) return false;
   const now = Date.now();
+
+  // 1. Kiểm tra nhanh trong memory cache
+  const lastMemoryTime = lastProcessedAtByPsid.get(psid);
+  if (lastMemoryTime && now - lastMemoryTime < debounceMs) {
+    return true;
+  }
+  lastProcessedAtByPsid.set(psid, now);
+
   if (lastProcessedAtByPsid.size > 5000) {
     for (const [key, time] of lastProcessedAtByPsid.entries()) {
       if (now - time > 10 * 60 * 1000) lastProcessedAtByPsid.delete(key);
     }
   }
-  const lastTime = lastProcessedAtByPsid.get(psid);
-  if (lastTime && now - lastTime < debounceMs) {
-    return true;
+
+  if (process.env.NODE_ENV === 'test') {
+    return false;
   }
-  lastProcessedAtByPsid.set(psid, now);
-  return false;
+
+  // 2. Kiểm tra trong Firestore (chia sẻ giữa các Cloud Run instances)
+  try {
+    const conv = await getConversation(psid);
+    if (conv?.lastProcessedMessageAt) {
+      const lastTime =
+        typeof conv.lastProcessedMessageAt === 'number'
+          ? conv.lastProcessedMessageAt
+          : (conv.lastProcessedMessageAt as any)?.toMillis?.() ?? 0;
+      if (lastTime > 0 && now - lastTime < debounceMs) {
+        return true;
+      }
+    }
+    // Ghi nhận ngay mốc thời gian vào Firestore để chặn các container instances khác
+    await setLastProcessedMessageAt(psid, now);
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -390,6 +432,18 @@ export async function runFlowTurn(
 ): Promise<void> {
   await withLock(`psid:${psid}`, async () => {
     const current = await loadOrCreateConversation(psid);
+
+    // Khóa chống trùng theo thời gian (Debounce 4 giây bên trong withLock):
+    const lastProcessed = current?.lastProcessedMessageAt
+      ? typeof current.lastProcessedMessageAt === 'number'
+        ? current.lastProcessedMessageAt
+        : (current.lastProcessedMessageAt as any)?.toMillis?.() ?? 0
+      : 0;
+    if (lastProcessed > 0 && Date.now() - lastProcessed < 4000) {
+      console.log(`[runFlowTurn] Bỏ qua vì tin nhắn trước đó của PSID ${psid} vừa được xử lý cách đây ${Date.now() - lastProcessed}ms (< 4s)`);
+      return;
+    }
+
     const result = processInput(current, input);
 
     // Nếu khách gửi số sai hoặc thiếu số (AI_PHONE_INVALID): không tính lượt này vào các mốc xin số thông thường
@@ -484,7 +538,7 @@ export async function runFlowTurn(
     }
 
     let askPhoneCount = current.askPhoneCount ?? 0;
-    let lastAskedPhoneTurn = current.lastAskedPhoneTurn;
+    let lastAskedPhoneTurn = current.lastAskedPhoneTurn ?? null;
     if (phoneCadence.askPhone) {
       askPhoneCount += 1;
       lastAskedPhoneTurn = customerMessageCount;
@@ -494,10 +548,11 @@ export async function runFlowTurn(
       ...result.record,
       customerMessageCount,
       askPhoneCount,
-      lastAskedPhoneTurn,
+      lastAskedPhoneTurn: lastAskedPhoneTurn ?? null,
       customerName: customerName ?? current.customerName ?? null,
       gender: gender ?? current.gender ?? null,
       avatarUrl: avatarUrl ?? current.avatarUrl ?? null,
+      lastProcessedMessageAt: Date.now(),
     };
 
     if (result.leadPhone) {
@@ -695,15 +750,18 @@ async function handleMessagingEvent(event: MessagingEvent): Promise<void> {
 
   if (!psid) return;
 
-  // 1. Chống trùng lặp message_id (Facebook retry do timeout hoặc burst webhook)
-  if (mid && isDuplicateMid(mid)) {
+  // 1. Kiểm tra mã tin nhắn: Mỗi tin nhắn từ Facebook đều có message.mid duy nhất.
+  // Lưu mid vào bộ nhớ đệm và Firestore. Nếu mid đã tồn tại thì return bỏ qua ngay lập tức.
+  if (mid && (await isDuplicateMid(mid))) {
     console.log(`[handleMessagingEvent] Bỏ qua webhook trùng lặp mid=${mid} từ PSID ${psid}`);
     return;
   }
 
-  // 2. Chống dồn dập nhiều webhook cùng lúc từ cùng 1 PSID (Debounce 3 giây khi bấm quảng cáo)
-  if (isPsidDebounced(psid, 3000)) {
-    console.log(`[handleMessagingEvent] Bỏ qua webhook dồn dập (debounce 3s) từ PSID ${psid}`);
+  // 2. Khóa chống trùng theo thời gian (Debounce 4 giây):
+  // Trong Firestore, ghi nhận lastProcessedMessageAt = Date.now().
+  // Nếu có một sự kiện mới đến từ cùng 1 PSID trong vòng 4 giây kể từ tin trước, lập tức bỏ qua (return ngay).
+  if (await isPsidDebounced(psid, 4000)) {
+    console.log(`[handleMessagingEvent] Bỏ qua webhook dồn dập (debounce 4s) từ PSID ${psid}`);
     return;
   }
 
@@ -744,6 +802,16 @@ async function handleFirstOpen(psid: string): Promise<void> {
       if (current && current.state === 'CLOSED') {
         return;
       }
+      // Khóa chống trùng theo thời gian (Debounce 4 giây bên trong withLock):
+      const lastProcessed = current?.lastProcessedMessageAt
+        ? typeof current.lastProcessedMessageAt === 'number'
+          ? current.lastProcessedMessageAt
+          : (current.lastProcessedMessageAt as any)?.toMillis?.() ?? 0
+        : 0;
+      if (lastProcessed > 0 && Date.now() - lastProcessed < 4000) {
+        console.log(`[handleFirstOpen] Bỏ qua vì tin nhắn trước đó của PSID ${psid} vừa được xử lý cách đây ${Date.now() - lastProcessed}ms (< 4s)`);
+        return;
+      }
       await sendTypingOn({ id: psid });
 
       let customerName = current?.customerName ?? null;
@@ -782,6 +850,7 @@ async function handleFirstOpen(psid: string): Promise<void> {
         customerName: customerName ?? null,
         gender: gender ?? null,
         avatarUrl: avatarUrl ?? null,
+        lastProcessedMessageAt: Date.now(),
       });
     } catch (err) {
       await logError('handleFirstOpen', err, { psid });

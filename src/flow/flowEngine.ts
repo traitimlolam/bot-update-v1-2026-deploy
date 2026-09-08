@@ -11,7 +11,8 @@ export interface ConversationRecord {
   avatarUrl?: string | null;
   customerMessageCount?: number;
   askPhoneCount?: number;
-  lastAskedPhoneTurn?: number;
+  lastAskedPhoneTurn?: number | null;
+  lastProcessedMessageAt?: number | any | null;
 }
 
 export interface PhoneCadenceResult {

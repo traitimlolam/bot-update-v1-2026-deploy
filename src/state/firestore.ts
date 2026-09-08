@@ -31,6 +31,11 @@ function getApp(): App {
 export function getDb(): Firestore {
   if (!db) {
     db = getFirestore(getApp());
+    try {
+      db.settings({ ignoreUndefinedProperties: true });
+    } catch {
+      // Bỏ qua nếu settings đã được cấu hình trước đó
+    }
   }
   return db;
 }
@@ -73,6 +78,11 @@ export interface StoredConversation extends ConversationRecord {
    * Dùng để tạm ngưng bot trong 10 phút, tránh chen ngang khi người thật đang tư vấn.
    */
   lastHumanReplyAt?: number | Timestamp | null;
+  /**
+   * Mốc thời gian (ms hoặc Timestamp) gần nhất nhận được tin nhắn từ PSID này.
+   * Dùng để khoá debounce chống trùng 4 giây giữa các webhook từ Facebook Ads.
+   */
+  lastProcessedMessageAt?: number | Timestamp | null;
 }
 
 const CONVERSATIONS_COLLECTION = 'conversations';
@@ -81,6 +91,45 @@ export async function getConversation(psid: string): Promise<StoredConversation 
   const doc = await getDb().collection(CONVERSATIONS_COLLECTION).doc(psid).get();
   if (!doc.exists) return null;
   return doc.data() as StoredConversation;
+}
+
+const PROCESSED_MIDS_COLLECTION = 'processed_mids';
+
+/**
+ * Kiểm tra và lưu mid vào Firestore (chia sẻ giữa các Cloud Run container instances).
+ * Trả về true nếu mid đã tồn tại (trùng lặp).
+ * Trả về false nếu là mid mới, đồng thời ghi nhận vào Firestore.
+ */
+export async function checkAndSaveMidInFirestore(mid: string): Promise<boolean> {
+  if (!mid) return false;
+  try {
+    const docRef = getDb().collection(PROCESSED_MIDS_COLLECTION).doc(mid);
+    const snap = await docRef.get();
+    if (snap.exists) {
+      return true;
+    }
+    await docRef.set({
+      mid,
+      createdAt: Date.now(),
+    });
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Ghi nhận lastProcessedMessageAt cho PSID vào Firestore để debounce 4s giữa các instances.
+ */
+export async function setLastProcessedMessageAt(psid: string, timestampMs: number): Promise<void> {
+  try {
+    await getDb()
+      .collection(CONVERSATIONS_COLLECTION)
+      .doc(psid)
+      .set({ lastProcessedMessageAt: timestampMs }, { merge: true });
+  } catch {
+    // Không chặn luồng nếu Firestore ghi nhận tạm thời thất bại
+  }
 }
 
 /**

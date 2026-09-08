@@ -88,50 +88,50 @@ describe("isDuplicateMid - Chống Facebook retry webhook trùng lặp message_i
     resetWebhookDeduplicationForTest();
   });
 
-  it("mid rỗng hoặc undefined không coi là duplicate", () => {
-    expect(isDuplicateMid(undefined)).toBe(false);
-    expect(isDuplicateMid("")).toBe(false);
+  it("mid rỗng hoặc undefined không coi là duplicate", async () => {
+    expect(await isDuplicateMid(undefined)).toBe(false);
+    expect(await isDuplicateMid("")).toBe(false);
   });
 
-  it("lần đầu nhận mid trả về false, lần 2 với cùng mid trả về true (duplicate)", () => {
+  it("lần đầu nhận mid trả về false, lần 2 với cùng mid trả về true (duplicate)", async () => {
     const mid = "m_mid_test_123456";
-    expect(isDuplicateMid(mid)).toBe(false);
-    expect(isDuplicateMid(mid)).toBe(true);
+    expect(await isDuplicateMid(mid)).toBe(false);
+    expect(await isDuplicateMid(mid)).toBe(true);
   });
 
-  it("hai mid khác nhau đều được chấp nhận độc lập", () => {
-    expect(isDuplicateMid("mid_a")).toBe(false);
-    expect(isDuplicateMid("mid_b")).toBe(false);
-    expect(isDuplicateMid("mid_a")).toBe(true);
-    expect(isDuplicateMid("mid_b")).toBe(true);
+  it("hai mid khác nhau đều được chấp nhận độc lập", async () => {
+    expect(await isDuplicateMid("mid_a")).toBe(false);
+    expect(await isDuplicateMid("mid_b")).toBe(false);
+    expect(await isDuplicateMid("mid_a")).toBe(true);
+    expect(await isDuplicateMid("mid_b")).toBe(true);
   });
 });
 
-describe("isPsidDebounced - Chống bão webhook Meta khi khách bấm quảng cáo (Debounce 3s)", () => {
+describe("isPsidDebounced - Chống bão webhook Meta khi khách bấm quảng cáo (Debounce 4s)", () => {
   beforeEach(() => {
     resetWebhookDeduplicationForTest();
   });
 
-  it("psid rỗng không debounce", () => {
-    expect(isPsidDebounced("")).toBe(false);
+  it("psid rỗng không debounce", async () => {
+    expect(await isPsidDebounced("")).toBe(false);
   });
 
-  it("lần đầu tiếp nhận PSID trả về false (không debounce)", () => {
-    expect(isPsidDebounced("PSID_12345")).toBe(false);
+  it("lần đầu tiếp nhận PSID trả về false (không debounce)", async () => {
+    expect(await isPsidDebounced("PSID_12345")).toBe(false);
   });
 
-  it("sự kiện thứ 2 trong vòng 3 giây cùng PSID lập tức bị debounce (trả về true)", () => {
+  it("sự kiện thứ 2 trong vòng 4 giây cùng PSID lập tức bị debounce (trả về true)", async () => {
     const psid = "PSID_NGUYEN_THUY";
-    expect(isPsidDebounced(psid, 3000)).toBe(false);
+    expect(await isPsidDebounced(psid, 4000)).toBe(false);
     // Bắn tiếp sự kiện thứ 2 sau vài ms
-    expect(isPsidDebounced(psid, 3000)).toBe(true);
+    expect(await isPsidDebounced(psid, 4000)).toBe(true);
     // Bắn tiếp sự kiện thứ 3
-    expect(isPsidDebounced(psid, 3000)).toBe(true);
+    expect(await isPsidDebounced(psid, 4000)).toBe(true);
   });
 
-  it("hai PSID khác nhau không chặn lẫn nhau", () => {
-    expect(isPsidDebounced("PSID_KHACH_A", 3000)).toBe(false);
-    expect(isPsidDebounced("PSID_KHACH_B", 3000)).toBe(false);
+  it("hai PSID khác nhau không chặn lẫn nhau", async () => {
+    expect(await isPsidDebounced("PSID_KHACH_A", 4000)).toBe(false);
+    expect(await isPsidDebounced("PSID_KHACH_B", 4000)).toBe(false);
   });
 
   it("khống chế MAX_BUBBLES_PER_TURN cố định là 3 bong bóng", () => {
