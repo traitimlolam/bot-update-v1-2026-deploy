@@ -16,7 +16,6 @@ export type LeadSource = 'Tin nhắn' | 'Cmt';
  * sách thay vì đúng khách. Đọc từ env để đổi Fanpage không cần sửa code; mặc định là Fanpage "Bất
  * động sản giá rẻ Hòa Bình" đang vận hành.
  */
-const FB_PAGE_ID = process.env.FB_PAGE_ID || '523264577527911';
 
 export interface LeadInput {
   /** Cột A: ngày ghi nhận dd/mm — mặc định thời điểm hiện tại, truyền tay được để test. */
@@ -387,27 +386,21 @@ export async function appendLead(lead: LeadInput): Promise<string> {
     // Sheet parse chuỗi "=HYPERLINK(...)" thành công thức bấm được thay vì ghi y nguyên dạng text.
     // Bắt buộc phải có cả asset_id (Fanpage) và thread_type — thiếu 1 trong 2, Meta Business Suite sẽ
     // không định tuyến được và luôn mở nhầm cuộc trò chuyện đầu tiên trong danh sách thay vì đúng khách.
-    if (lead.psid || lead.threadId) {
-      let targetItemId = lead.threadId;
-      if (!targetItemId && lead.psid) {
-        targetItemId = (await resolveFacebookThreadId(lead.psid)) || lead.psid;
-      }
-      // Dùng dấu chấm phẩy ; cho Google Sheet locale vi_VN để tránh lỗi cú pháp #ERROR!
-      const bpnId = process.env.FB_BPN_ID || '1126426985565027';
-      const hyperlinkFormula =
-        `=HYPERLINK("https://business.facebook.com/latest/inbox/all?bpn_id=${bpnId}&asset_id=${FB_PAGE_ID}&nav_ref=manage_page_ap_plus_default&selected_item_id=${targetItemId}"; ` +
-        `"Link chat trực tiếp với khách trên Facebook")`;
-      await withRetry(() =>
-        sheets.spreadsheets.values.update({
-          spreadsheetId,
-          range: `'${targetSheetName}'!H${rowNumber}`,
-          valueInputOption: 'USER_ENTERED',
-          requestBody: {
-            values: [[hyperlinkFormula]],
-          },
-        })
-      );
-    }
+    // Ghi cột H: Link tìm kiếm và xem trang cá nhân Facebook của khách hàng để thẩm định tiềm năng
+    const fbFormula = lead.customerName
+      ? `=HYPERLINK("https://www.facebook.com/search/people/?q=" & ENCODEURL(C${rowNumber}); "Xem Facebook: " & C${rowNumber})`
+      : `=HYPERLINK("https://www.facebook.com/search/top/?q=" & ENCODEURL(B${rowNumber}); "Tìm FB theo SĐT")`;
+
+    await withRetry(() =>
+      sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range: `'${targetSheetName}'!H${rowNumber}`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: {
+          values: [[fbFormula]],
+        },
+      })
+    );
 
     const existingValue = await withRetry(async () => {
       const res = await sheets.spreadsheets.values.get({
