@@ -472,12 +472,6 @@ export async function runFlowTurn(
       return;
     }
 
-    // Khóa chống trùng theo thời gian (Debounce 4 giây bên trong withLock):
-    const lastProcessed = getTimestampMillis(current?.lastProcessedMessageAt);
-    if (lastProcessed > 0 && Date.now() - lastProcessed < 4000) {
-      console.log(`[runFlowTurn] Bỏ qua vì tin nhắn trước đó của PSID ${psid} vừa được xử lý cách đây ${Date.now() - lastProcessed}ms (< 4s)`);
-      return;
-    }
 
     const result = processInput(current, input);
 
@@ -860,12 +854,6 @@ async function handleFirstOpen(psid: string): Promise<void> {
       }
       if (current && isHumanTakeoverActive(current.lastHumanReplyAt)) {
         console.log(`[humanTakeover] Bỏ qua handleFirstOpen vì nhân viên đang chat trực tiếp với PSID ${psid}`);
-        return;
-      }
-      // Khóa chống trùng theo thời gian (Debounce 4 giây bên trong withLock):
-      const lastProcessed = getTimestampMillis(current?.lastProcessedMessageAt);
-      if (lastProcessed > 0 && Date.now() - lastProcessed < 4000) {
-        console.log(`[handleFirstOpen] Bỏ qua vì tin nhắn trước đó của PSID ${psid} vừa được xử lý cách đây ${Date.now() - lastProcessed}ms (< 4s)`);
         return;
       }
       await sendTypingOn({ id: psid });
