@@ -518,9 +518,9 @@ Thực hiện lần lượt, mỗi bước commit riêng, có test trước khi 
   - Avatar phong cảnh, hoa lá, đồ vật, che mặt, timeout -> fallback về đại từ lịch sự "anh/chị". Tuyệt đối không gọi cộc lốc bằng tên riêng.
   - Khách tự xưng "anh"/"chị" trong tin nhắn -> ưu tiên tuyệt đối theo khách.
 
-### 15.6. Cài đặt thông tin người đăng bài trên Fanpage
-- Thông tin cố định ở chân toàn bộ bài viết tự động trong `src/services/autoPostService.ts`:
+### 15.6. Cài đặt thông tin liên hệ chân bài đăng trên Fanpage
+- Không chèn dòng chữ "Người đăng: Nguyễn Trọng Hiếu" vào nội dung bài viết (thông tin người đăng do ứng dụng Facebook hiển thị riêng).
+- Ở phần chân bài (trước các thẻ hashtag) chỉ giữ lại thông tin liên hệ theo mẫu:
   ```
-  Người đăng: Nguyễn Trọng Hiếu
   Hotline / Zalo tư vấn và xe đưa đón xem đất: 0916.060.254
   ```

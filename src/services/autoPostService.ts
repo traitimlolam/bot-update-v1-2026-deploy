@@ -32,12 +32,11 @@ const ROUTER_API_KEY =
 const GRAPH_BASE_URL = "https://graph.facebook.com/v19.0";
 const AI_TIMEOUT_MS = 25000;
 
-// Thông tin người đăng bài và Hotline / Zalo liên hệ bắt buộc ở mỗi bài đăng
-export const DEFAULT_POSTER_NAME = "Nguyễn Trọng Hiếu";
+// Thông tin Hotline / Zalo liên hệ bắt buộc ở mỗi bài đăng
 export const DEFAULT_HOTLINE = "0916.060.254";
 export const HOTLINE_PHONE = process.env.HOTLINE_PHONE || DEFAULT_HOTLINE;
-export const POSTER_INFO_LINE = `Người đăng: ${DEFAULT_POSTER_NAME}\nHotline / Zalo tư vấn và xe đưa đón xem đất: ${HOTLINE_PHONE}`;
-export const HOTLINE_LINE = POSTER_INFO_LINE;
+export const HOTLINE_LINE = `Hotline / Zalo tư vấn và xe đưa đón xem đất: ${HOTLINE_PHONE}`;
+export const POSTER_INFO_LINE = HOTLINE_LINE;
 
 // 2. KHO ẢNH PHONG CẢNH THỰC TẾ HÒA BÌNH TUYỂN CHỌN (100% chuẩn làng quê, đồi núi Lạc Sơn, thung lũng Mai Châu, hồ Thung Nai, nhà vườn ven đô)
 const HOA_BINH_CURATED_POOLS: Record<PostTopic, string[]> = {
@@ -202,7 +201,7 @@ export function cleanCaption(rawContent: string): string {
   // 4. Xóa dấu ngoặc kép bọc ngoài bài viết nếu AI vô tình thêm vào
   text = text.replace(/^[\"“](.*)[\"”]$/s, "$1").trim();
 
-  // 5. Kiểm tra an toàn bắt buộc: luôn chèn cố định thông tin người đăng & hotline trước hashtag
+  // 5. Kiểm tra an toàn bắt buộc: luôn chèn cố định thông tin hotline trước hashtag
   let before = text;
   let hashtags = "#datnghiduong #dathoabinh #bdsgiare #secondhome #datnengiare";
 
@@ -212,13 +211,13 @@ export function cleanCaption(rawContent: string): string {
     hashtags = text.slice(firstHashtagIdx).trim();
   }
 
-  // Xóa mọi dòng thông tin người đăng hoặc hotline cũ ở cuối bài để tránh trùng lặp
+  // Xóa mọi dòng thông tin người đăng cũ hoặc hotline cũ ở cuối bài để tránh trùng lặp
   before = before
     .replace(/Người đăng:[^\n]+/gi, "")
     .replace(/📞?\s*Hotline[^\n]+/gi, "")
     .trimEnd();
 
-  text = `${before}\n\n${POSTER_INFO_LINE}\n\n${hashtags}`;
+  text = `${before}\n\n${HOTLINE_LINE}\n\n${hashtags}`;
 
   return text.trim();
 }
@@ -240,8 +239,8 @@ QUY TẮC BẮT BUỘC:
    - Dòng 1: Tiêu đề thu hút, có emoji phù hợp.
    - Thân bài (2-3 đoạn ngắn): Nêu bật điểm đắt giá nhất của khu đất (không khí trong lành, view đồi xanh, sổ đỏ trao tay, full thổ cư, giá chỉ từ 1,5 - 2 triệu/m2, chỉ hơn 100 triệu một lô, ô tô vào tận đất).
    - Đoạn kết: Lời kêu gọi hành động (CTA) tự nhiên: Mời anh chị để lại bình luận hoặc nhắn tin trực tiếp để nhận thông tin sổ đỏ và vị trí thực tế.
-   - BẮT BUỘC CHÈN DÒNG THÔNG TIN NGƯỜI ĐĂNG: Ở cuối đoạn kết bài, trước các hashtag, BẮT BUỘC luôn có thông tin người đăng:
-${POSTER_INFO_LINE}
+   - BẮT BUỘC CHÈN DÒNG THÔNG TIN LIÊN HỆ: Ở cuối đoạn kết bài, trước các hashtag, BẮT BUỘC luôn có dòng hotline:
+${HOTLINE_LINE}
 3. TUYỆT ĐỐI KHÔNG dùng ký hiệu in đậm markdown (**). Không dùng tiêu đề markdown (# ). Chỉ dùng chữ thường tự nhiên kèm emoji.
 4. Cuối bài đính kèm các hashtag: #datnghiduong #dathoabinh #bdsgiare #secondhome #datnengiare
 `.trim();
