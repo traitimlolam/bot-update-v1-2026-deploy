@@ -38,35 +38,108 @@ export const HOTLINE_PHONE = process.env.HOTLINE_PHONE || DEFAULT_HOTLINE;
 export const HOTLINE_LINE = `Hotline / Zalo tư vấn và xe đưa đón xem đất: ${HOTLINE_PHONE}`;
 export const POSTER_INFO_LINE = HOTLINE_LINE;
 
-// 2. KHO ẢNH PHONG CẢNH THỰC TẾ HÒA BÌNH TUYỂN CHỌN (100% chuẩn làng quê, đồi núi Lạc Sơn, thung lũng Mai Châu, hồ Thung Nai, nhà vườn ven đô)
-const HOA_BINH_CURATED_POOLS: Record<PostTopic, string[]> = {
-  MORNING: [
-    // Sương sớm, đồi núi thoai thoải Lạc Sơn, thung lũng Mai Châu xanh mát
-    "https://cdn.tgdd.vn/Files/2023/03/13/1517343/du-lich-lac-son-hoa-binh-co-gi-hap-dan-kham-pha-ngay-202303142302489649.jpg",
-    "https://saomaifly.com/image/catalog/thung-lung-mai-chau-tinh-hoa-binh.jpg",
-    "https://dulichkhatvongviet.com/wp-content/uploads/2024/05/thung-lung-mai-chau.jpg",
-    "https://titangroup.vn/wp-content/uploads/du-lich-mai-chau-hoa-binh.jpg",
-    "https://cdn.tgdd.vn/Files/2023/03/13/1517343/du-lich-lac-son-hoa-binh-co-gi-hap-dan-kham-pha-ngay-202303142300169058.jpg",
-    "https://dulichkhatvongviet.com/wp-content/uploads/2019/03/Mai-Chau.jpg",
-  ],
-  NOON: [
-    // Đất nền thực tế, đường làng bê tông, ruộng bậc thang mùa lúa, cảnh làng quê Hòa Bình
-    "https://cdn.tgdd.vn/Files/2023/03/13/1517343/du-lich-lac-son-hoa-binh-co-gi-hap-dan-kham-pha-ngay-202303142303133077.jpg",
-    "https://media.vietnamplus.vn/images/6c6de9d9f940a6133c03c2b9de5db196b389af05bd9f4b988ecbfb8af2ffdafc838fd54a674bf6928db7a869e43b0de10d1eb70a9d7a1d59774dcce3f22d82d8/lua-chin-8-9926.jpg",
-    "https://imgnvsk.vnanet.vn/mediaupload/content/2024/11/04/154-21-22-10.jpg",
-    "https://hnm.1cdn.vn/2023/10/19/cdnimg.vietnamplus.vn-t870-uploaded-qfsqy-2023_10_18-_ttxvn_ruong1.jpg",
-    "https://cloud.muaban.net/images/thumb-detail/2026/01/05/064/bcc18eb2c9204cf5b71c6b09ada610f6.jpg",
-    "https://cloud.muaban.net/images/thumb-detail/2026/01/05/063/5f732e017d4e4cf49937075d8ab493fb.jpg",
-  ],
-  EVENING: [
-    // Lòng hồ Thung Nai sông Đà nước xanh ngọc, hoàng hôn đồi núi, toàn cảnh Tây Bắc
-    "https://www.vietnambooking.com/wp-content/uploads/2022/10/du-lich-thung-nai-hoa-binh-2-ngay-1-dem-11.jpg",
-    "https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEhlcWkQmV7crpzqcyg0QJesdWOkNCjRk3SElhe3t5oBwZ4l4Lq14CEE4Dm_IzgtopsEpIwFObW2mn-E44l5VJ1u2bSEWlaFFrn2mv9Xsdp-xkWafl-JFvc0sFHr8PhjhzSgwHmG2Jtv7-rVKMf9x_PPW-ZBGnRMd8YXMh4aU_sOTyekjoppDRA5gCTT6hw/w640-h428/Kh%C3%A1m%20ph%C3%A1%20Thung%20Nai%20H%C3%B2a%20B%C3%ACnh%20Vi%C3%AAn%20ng%E1%BB%8Dc%20xanh%20gi%E1%BB%AFa%20l%C3%B2ng%20h%E1%BB%93%20s%C3%B4ng%20%C4%90%C3%A0.jpg",
+export type HoaBinhImageCategory = "SCENERY" | "INFRASTRUCTURE" | "CULTURE";
+
+/**
+ * 2. KHO ẢNH MINH HỌA HÒA BÌNH TUYỂN CHỌN THEO 3 NHÓM CHỦ ĐỀ CHÍNH (Chuẩn nét >= 1200px, trực tiếp .jpg/.png, không watermark)
+ * - Nhóm 1: Danh lam thắng cảnh nổi tiếng (Thung Nai sông Đà, Thung lũng Mai Châu, Đèo Đá Trắng/Thung Khe, Thác Mu Lạc Sơn)
+ * - Nhóm 2: Công trình trọng điểm và biểu tượng hạ tầng (Thủy điện Hòa Bình, Cầu Hòa Bình sông Đà, Tượng đài Bác Hồ, Cao tốc Hòa Lạc - Hòa Bình, Quy hoạch Sun Group Đồi Thung)
+ * - Nhóm 3: Văn hóa dân tộc và lễ hội đặc sắc (Lễ hội Khai Hạ người Mường, Cồng chiêng Mường, Nhà sàn truyền thống, Ẩm thực cơm lam)
+ */
+export const HOA_BINH_IMAGE_GROUPS: Record<HoaBinhImageCategory, string[]> = {
+  // Nhóm 1: Danh lam thắng cảnh nổi tiếng (khớp với phong cách sống xanh, nghỉ dưỡng cuối tuần)
+  SCENERY: [
+    // Lòng hồ Thung Nai sông Đà (Vịnh Hạ Long trên núi)
+    "https://images.vietnamtourism.gov.vn/vn/images/2021/thung_nai-titc.jpg",
+    "https://maichauhideaway.com/Data/Sites/1/media/thung-nai-hoa-binh/image10.jpg",
     "https://ticotravel.com.vn/wp-content/uploads/2022/05/thung-nai-hoa-binh-1.jpg",
-    "https://maichauhideaway.com/Data/Sites/1/media/thung-nai-hoa-binh/image6.jpg",
-    "https://bazaarvietnam.vn/wp-content/uploads/2025/04/harper-bazaar-du-lich-hoa-binh-3.jpeg",
+    // Thung lũng Mai Châu mùa lúa xanh mướt & sương sớm
+    "https://cdn0897.cdn4s1.com/media/daily-excursions/hoa-binh/mai-chau.jpg",
+    "https://saomaifly.com/image/catalog/thung-lung-mai-chau-tinh-hoa-binh.jpg",
+    // Đèo Thung Khe (đèo Đá Trắng) quanh năm mây phủ
+    "https://images.vietnamtourism.gov.vn/vn/images/2022/thang_2/2302.deo_da_trang_(hoa_binh)_-_diem_den_thu_hut_khach_du_lich.jpg",
+    // Cảnh quan đồi thoai thoải & Thác nước Lạc Sơn (Thác Mu)
+    "https://dulichcongdongthacmu.com/images/thacmu111.jpg",
+    "https://bazaarvietnam.vn/wp-content/uploads/2025/04/harper-bazaar-cac-dia-diem-du-lich-hoa-binh-thac-mu.jpg",
+  ],
+
+  // Nhóm 2: Công trình trọng điểm và biểu tượng hạ tầng (khớp với phân tích đầu tư, tiềm năng tăng giá, quy hoạch)
+  INFRASTRUCTURE: [
+    // Nhà máy Thủy điện Hòa Bình
+    "https://upload.wikimedia.org/wikipedia/commons/7/70/H%C3%B2a_B%C3%ACnh_Dam.JPG",
+    "https://upload.wikimedia.org/wikipedia/commons/f/f5/Hoa_Binh_Dam_Power_Plant.JPG",
+    "https://bcp.cdnchinhphu.vn/Uploaded/trantoanthang/2019_09_25/45743071_582243778875273_5920333751467900928_n.jpg",
+    // Cầu Hòa Bình bắc qua sông Đà
+    "https://upload.wikimedia.org/wikipedia/commons/e/e4/HoaBinh_Dam_-_Vietnam.JPG",
+    "https://media-cdn-v2.laodong.vn/Storage/NewsPortal/2023/1/19/1139753/Cau-Hoa-Binh-3.JPG",
+    // Tượng đài Bác Hồ trên đồi ông Tượng
+    "https://phuongnam.vanhoavaphattrien.vn/uploads/images/2023/11/14/z4874116107381-f89b3e8d21a0a40e38ac2e0193630c63-1699940342.jpg",
+    // Tuyến cao tốc Hòa Lạc - Hòa Bình & hạ tầng giao thông
+    "https://realbiz.vn/wp-content/uploads/2023/05/duong-cao-toc-hoa-lac-hoa-binh-la-mot-tuyen-duong-cao-toc-o-viet-nam-1116x628.jpg",
+    // Quy hoạch tổ hợp nghỉ dưỡng khoáng nóng Đồi Thung của Sun Group
+    "https://media-cdn-v2.laodong.vn/storage/newsportal/2025/11/29/1617446/Doi_Thung.jpg",
+    "https://trannghia.net/wp-content/uploads/2022/02/can-canh-doi-thung.png",
+  ],
+
+  // Nhóm 3: Văn hóa dân tộc và lễ hội đặc sắc (khớp với chia sẻ văn hóa, con người, đời sống bản địa)
+  CULTURE: [
+    // Lễ hội Khai Hạ truyền thống của người Mường (Di sản văn hóa phi vật thể quốc gia)
+    "https://cly.1cdn.vn/2023/01/29/cdn-congly-vn_le-hoi-khai-ha-dac-sac-rieng-cua-dan-toc-muong-o-hoa-binh-hinh-anh01657009134.jpg",
+    "https://images.baodantoc.vn/uploads/lethihongphuc/2023/1/28/c9d4d56b-1539-4da5-a-16746374630901356692072.jpg",
+    "https://imgchinhsachcuocsong.vnanet.vn/MediaUpload/Org/2024/02/17/145332-thumbstand-1.jpg",
+    // Nét đẹp văn hóa cồng chiêng Mường Hòa Bình
+    "https://hoinhap.vanhoavaphattrien.vn/uploads/2025/04/09/1-chieng-muong-1744174934.jpg",
+    "https://nhn.1cdn.vn/2023/08/05/img_8081.jpg",
+    // Không gian nhà sàn truyền thống của đồng bào Mường, Thái giữa thung lũng
+    "https://maichautourist.com/assets/uploads/blog/nha-san-so-6-ban-lac-mai-chau-hoa-binh-1.JPG",
+    // Nét ẩm thực cơm lam thịt nướng mộc mạc
+    "https://galatravel.vn/pic/destination/images/com-lam-mai-chau.jpg",
+    "https://viptrip.vn/public/upload/news/com-lam-mai-chau_19-10-2022_425592055.jpg",
   ],
 };
+
+// Duy trì tương thích ngược với cấu trúc theo buổi
+export const HOA_BINH_CURATED_POOLS: Record<PostTopic, string[]> = {
+  MORNING: HOA_BINH_IMAGE_GROUPS.SCENERY,
+  NOON: HOA_BINH_IMAGE_GROUPS.INFRASTRUCTURE,
+  EVENING: HOA_BINH_IMAGE_GROUPS.INFRASTRUCTURE,
+};
+
+/**
+ * Thuật toán ghép nối ảnh ăn khớp với nội dung bài viết (Context Mapping):
+ * - Nếu bài viết nói về nghỉ dưỡng, không gian sống xanh, nhà vườn cuối tuần -> Nhóm 1 (SCENERY).
+ * - Nếu bài viết nói về pháp lý, giá trị đất, đón sóng quy hoạch cao tốc, cơ hội đầu tư giữ tiền -> Nhóm 2 (INFRASTRUCTURE).
+ * - Nếu bài viết kể chuyện trải nghiệm, giới thiệu vùng đất, con người và nguồn gốc văn hóa Hòa Bình -> Nhóm 3 (CULTURE).
+ */
+export function classifyImageCategory(content: string, topic?: PostTopic): HoaBinhImageCategory {
+  const norm = (content || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d");
+
+  // Nhóm 3: Văn hóa dân tộc, lễ hội Khai Hạ, cồng chiêng, nhà sàn, ẩm thực bản địa
+  const isCulture = /(van hoa|le hoi|khai ha|cong chieng|nha san|ban sac|truyen thong|am thuc|com lam|thit nuong|nguoi muong|nguoi thai|trai nghiem|doi song ban dia|con nguoi)/.test(norm);
+  if (isCulture) {
+    return "CULTURE";
+  }
+
+  // Nhóm 2: Pháp lý, giá trị đất, quy hoạch, cao tốc, thủy điện, hạ tầng, cơ hội đầu tư giữ tiền
+  const isInfrastructure = /(phap ly|gia tri dat|quy hoach|cao toc|ha tang|thuy dien|cong trinh|dau tu|tich san|giu tien|bien do|sinh loi|sun group|doi thung|tang gia|don song|giao thong|so do|tho cu|cau hoa binh|tuong dai)/.test(norm);
+  if (isInfrastructure) {
+    return "INFRASTRUCTURE";
+  }
+
+  // Nhóm 1: Nghỉ dưỡng, sống xanh, nhà vườn cuối tuần, thiên nhiên, thung lũng, hồ Thung Nai, đồi Lạc Sơn
+  const isScenery = /(nghi duong|song xanh|khong gian xanh|nha vuon|second home|cuoi tuan|thien nhien|thung lung|suong som|view doi|suoi|thac|thung nai|mai chau|thung khe|da trang|lac son)/.test(norm);
+  if (isScenery) {
+    return "SCENERY";
+  }
+
+  // Fallback theo topic nếu bài viết chưa đủ từ khóa nhận diện:
+  if (topic === "NOON" || topic === "EVENING") return "INFRASTRUCTURE";
+  return "SCENERY";
+}
 
 // Đa dạng hóa góc nhìn cho từng khung giờ để bài đăng mỗi ngày luôn mới mẻ
 const TOPIC_ANGLES: Record<PostTopic, Array<{ prompt: string; keywords: string }>> = {
@@ -347,31 +420,16 @@ export async function searchDynamicHoaBinhImage(query: string): Promise<string |
  * 2. Tìm ảnh minh họa chất lượng cao: Ưu tiên tìm ảnh động Hòa Bình theo từ khóa tiếng Việt,
  * nếu không thấy sẽ bốc ngẫu nhiên từ kho ảnh Hòa Bình thực tế đã chọn lọc.
  */
-export async function searchContextImageUrl(query: string, topic?: PostTopic): Promise<string> {
-  let targetTopic: PostTopic = topic || "MORNING";
+export async function searchContextImageUrl(
+  query: string,
+  topic?: PostTopic,
+  captionText?: string
+): Promise<string> {
+  const fullContext = `${query || ""} ${captionText || ""}`.trim();
+  const category = classifyImageCategory(fullContext, topic);
 
-  if (!topic) {
-    const lower = (query || "").toLowerCase();
-    if (lower.includes("sông đà") || lower.includes("thung nai") || lower.includes("hoàng hôn") || lower.includes("hạ tầng")) {
-      targetTopic = "EVENING";
-    } else if (lower.includes("ruộng") || lower.includes("thửa đất") || lower.includes("đất nền") || lower.includes("lạc sơn")) {
-      targetTopic = "NOON";
-    } else {
-      targetTopic = "MORNING";
-    }
-  }
-
-  // 1. Thử tìm ảnh động bằng từ khóa tiếng Việt về Hòa Bình
-  if (query && query.trim()) {
-    const dynamicImg = await searchDynamicHoaBinhImage(query);
-    if (dynamicImg) {
-      console.log(`[autoPost] Found authentic dynamic Hoa Binh image for "${query}":`, dynamicImg);
-      return dynamicImg;
-    }
-  }
-
-  // 2. Bốc ngẫu nhiên từ kho ảnh phong cảnh thực tế Hòa Bình tuyển chọn (100% chuẩn nét, không dùng ảnh Tây)
-  const pool = HOA_BINH_CURATED_POOLS[targetTopic] || HOA_BINH_CURATED_POOLS.MORNING;
+  // Chọn ảnh trực tiếp từ kho ảnh tuyển chọn Hòa Bình theo nhóm đã phân loại (đảm bảo 100% ảnh thật Hòa Bình, không lẫn ảnh nơi khác)
+  const pool = HOA_BINH_IMAGE_GROUPS[category] || HOA_BINH_IMAGE_GROUPS.SCENERY;
   const randomUrl = pool[Math.floor(Math.random() * pool.length)];
 
   const cacheBuster = Math.floor(Math.random() * 1000000);
@@ -443,7 +501,7 @@ export async function executeAutoPost(topic?: PostTopic): Promise<AutoPostResult
 
   console.log(`[autoPost] Starting auto-post workflow for topic: ${targetTopic}`);
   const post = await generatePostContent(targetTopic);
-  const imageUrl = await searchContextImageUrl(post.imageQuery, targetTopic);
+  const imageUrl = await searchContextImageUrl(post.imageQuery, targetTopic, post.caption);
   const result = await publishPostToPage(post.caption, imageUrl);
 
   return {

@@ -524,3 +524,14 @@ Thực hiện lần lượt, mỗi bước commit riêng, có test trước khi 
   ```
   Hotline / Zalo tư vấn và xe đưa đón xem đất: 0916.060.254
   ```
+
+### 15.7. Kho ảnh chuẩn Hòa Bình và cơ chế Context Mapping (searchContextImageUrl)
+- **3 Nhóm kho ảnh tuyển chọn (`HOA_BINH_IMAGE_GROUPS`):**
+  - **Nhóm 1 (SCENERY - Danh lam thắng cảnh nổi tiếng):** Lòng hồ Thung Nai sông Đà (Vịnh Hạ Long trên núi), Thung lũng Mai Châu sương sớm & mùa lúa, Đèo Thung Khe (đèo Đá Trắng), Đồi thoai thoải & Thác Mu Lạc Sơn.
+  - **Nhóm 2 (INFRASTRUCTURE - Công trình trọng điểm & biểu tượng hạ tầng):** Nhà máy Thủy điện Hòa Bình, Cầu Hòa Bình bắc qua sông Đà, Tượng đài Bác Hồ đồi ông Tượng, Tuyến cao tốc Hòa Lạc - Hòa Bình, Phối cảnh quy hoạch Sun Group Đồi Thung Lạc Sơn.
+  - **Nhóm 3 (CULTURE - Văn hóa dân tộc & lễ hội đặc sắc):** Lễ hội Khai Hạ người Mường (Di sản phi vật thể quốc gia), Nét đẹp văn hóa cồng chiêng Mường, Không gian nhà sàn truyền thống Mường/Thái, Ẩm thực cơm lam thịt nướng mộc mạc.
+- **Thuật toán Context Mapping (`classifyImageCategory`):**
+  - Bài viết về nghỉ dưỡng, không gian sống xanh, nhà vườn cuối tuần $\rightarrow$ Nhóm 1 (`SCENERY`).
+  - Bài viết về pháp lý, giá trị đất, quy hoạch cao tốc, đầu tư tích sản $\rightarrow$ Nhóm 2 (`INFRASTRUCTURE`).
+  - Bài viết về văn hóa, lễ hội, cồng chiêng, nhà sàn, ẩm thực $\rightarrow$ Nhóm 3 (`CULTURE`).
+- **Tiêu chuẩn kỹ thuật ảnh:** 100% URL trực tiếp (.jpg/.png), phân giải cao $\ge 1200px$, CDN ổn định, không watermark, gắn mã chống cache (`?sig=`).
