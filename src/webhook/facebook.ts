@@ -592,8 +592,38 @@ async function fetchCustomerName(psid: string): Promise<string | null> {
   return profile.name;
 }
 
+/**
+ * Kiểm tra xem tài khoản có ảnh đại diện hay không:
+ * - Trường hợp 1: avatarUrl là null, undefined hoặc chuỗi rỗng.
+ * - Trường hợp 2: avatarUrl trỏ đến ảnh mặc định của Facebook (chuỗi URL chứa các từ khóa
+ *   nhận diện ảnh trống của Meta như 'silhouette', 'default-avatar', 'platform/profilepic')
+ *   hoặc cờ isSilhouette === true.
+ */
+export function isNoAvatar(avatarUrl?: string | null, isSilhouette?: boolean): boolean {
+  if (isSilhouette === true) return true;
+  if (!avatarUrl || typeof avatarUrl !== 'string') return true;
+  const trimmed = avatarUrl.trim();
+  if (!trimmed) return true;
+
+  const lower = trimmed.toLowerCase();
+  const defaultKeywords = ['silhouette', 'default-avatar', 'platform/profilepic'];
+  return defaultKeywords.some((keyword) => lower.includes(keyword));
+}
+
 async function handleMessagingEvent(event: MessagingEvent): Promise<void> {
   const psid = event.sender.id;
+
+  // [Bộ lọc No-Avatar] Chặn khách không có ảnh đại diện ở cổng đón tiếp đầu tiên
+  try {
+    const profile = await fetchCustomerProfile(psid);
+    const avatarUrl = profile.profilePicUrl;
+    if (isNoAvatar(avatarUrl, profile.isSilhouette)) {
+      console.log(`Bỏ qua tin nhắn do khách không có avatar (PSID: ${psid})`);
+      return;
+    }
+  } catch (err) {
+    console.error(`[noAvatarFilter] Lỗi khi kiểm tra avatar của PSID ${psid}:`, err);
+  }
 
   // Kiểm tra Human Takeover (nhường người thật chat trong vòng 10 phút)
   const conversation = await getConversation(psid);
@@ -958,6 +988,20 @@ async function handleFeedChange(value: FeedCommentValue, pageId?: string): Promi
 
   const commenterId = value.from.id;
   const commentId = value.comment_id;
+
+  // [Bộ lọc No-Avatar] Chặn khách không có ảnh đại diện ở cổng đón tiếp đầu tiên
+  try {
+    const profile = await fetchCustomerProfile(commenterId);
+    const avatarUrl = profile.profilePicUrl;
+    if (isNoAvatar(avatarUrl, profile.isSilhouette)) {
+      console.log(
+        `Bỏ qua tin nhắn do khách không có avatar (Commenter: ${commenterId}, Comment: ${commentId})`
+      );
+      return;
+    }
+  } catch (err) {
+    console.error(`[noAvatarFilter] Lỗi khi kiểm tra avatar Commenter ${commenterId}:`, err);
+  }
   const customerName = value.from.name ?? null;
   const commentText = value.message ?? '';
   const phoneCheck = checkPhone(commentText);
@@ -1051,4 +1095,4 @@ export async function handleWebhookEvent(req: Request, res: Response): Promise<v
   }
 }
 
-export { handleFirstOpen, handleFeedChange, hideComment };
+export { handleFirstOpen, handleFeedChange, hideComment, handleMessagingEvent };
