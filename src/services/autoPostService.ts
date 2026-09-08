@@ -32,10 +32,12 @@ const ROUTER_API_KEY =
 const GRAPH_BASE_URL = "https://graph.facebook.com/v19.0";
 const AI_TIMEOUT_MS = 25000;
 
-// Hotline / Zalo liên hệ bắt buộc ở mỗi bài đăng
+// Thông tin người đăng bài và Hotline / Zalo liên hệ bắt buộc ở mỗi bài đăng
+export const DEFAULT_POSTER_NAME = "Nguyễn Trọng Hiếu";
 export const DEFAULT_HOTLINE = "0916.060.254";
 export const HOTLINE_PHONE = process.env.HOTLINE_PHONE || DEFAULT_HOTLINE;
-export const HOTLINE_LINE = `📞 Hotline / Zalo hỗ trợ tư vấn và xe đưa đón xem đất miễn phí: ${HOTLINE_PHONE}`;
+export const POSTER_INFO_LINE = `Người đăng: ${DEFAULT_POSTER_NAME}\nHotline / Zalo tư vấn và xe đưa đón xem đất: ${HOTLINE_PHONE}`;
+export const HOTLINE_LINE = POSTER_INFO_LINE;
 
 // 2. KHO ẢNH PHONG CẢNH THỰC TẾ HÒA BÌNH TUYỂN CHỌN (100% chuẩn làng quê, đồi núi Lạc Sơn, thung lũng Mai Châu, hồ Thung Nai, nhà vườn ven đô)
 const HOA_BINH_CURATED_POOLS: Record<PostTopic, string[]> = {
@@ -141,7 +143,7 @@ Buổi sáng hít thở bầu không khí trong lành thoang thoảng mùi cỏ 
 
 Anh chị quan tâm để lại bình luận hoặc nhắn tin trực tiếp cho trang để nhận trọn bộ hình ảnh thực tế và vị trí lô đất nhé!
 
-${HOTLINE_LINE}
+${POSTER_INFO_LINE}
 
 #datnghiduong #dathoabinh #bdsgiare #secondhome #datnengiare`,
 
@@ -157,7 +159,7 @@ Cơ hội hiếm có sở hữu lô đất nền nghỉ dưỡng tại Lạc Sơ
 
 Để lại bình luận hoặc nhắn tin ngay hôm nay để nhận thông tin trích lục sổ đỏ và chọn vị trí đẹp nhất ạ!
 
-${HOTLINE_LINE}
+${POSTER_INFO_LINE}
 
 #datnghiduong #dathoabinh #bdsgiare #secondhome #datnengiare`,
 
@@ -172,7 +174,7 @@ Khi bất động sản nội đô liên tục lập đỉnh, dòng tiền thôn
 
 Anh chị muốn đón đầu cơ hội hãy nhắn tin hoặc để lại bình luận bên dưới, em gửi ngay bảng giá và sơ đồ từng lô nhé!
 
-${HOTLINE_LINE}
+${POSTER_INFO_LINE}
 
 #datnghiduong #dathoabinh #bdsgiare #secondhome #datnengiare`,
 };
@@ -198,31 +200,25 @@ export function cleanCaption(rawContent: string): string {
   text = text.replace(/\*\*/g, "");
 
   // 4. Xóa dấu ngoặc kép bọc ngoài bài viết nếu AI vô tình thêm vào
-  text = text.replace(/^["“](.*)["”]$/s, "$1").trim();
+  text = text.replace(/^[\"“](.*)[\"”]$/s, "$1").trim();
 
-  // 5. Kiểm tra an toàn bắt buộc: nếu bài chưa có số điện thoại hotline thì tự động chèn vào trước hashtag
-  const hotlineNormalized = HOTLINE_PHONE.replace(/\./g, "");
-  const hasPhone =
-    text.includes(HOTLINE_PHONE) ||
-    text.includes(hotlineNormalized) ||
-    text.includes(DEFAULT_HOTLINE) ||
-    text.includes("0916060254");
+  // 5. Kiểm tra an toàn bắt buộc: luôn chèn cố định thông tin người đăng & hotline trước hashtag
+  let before = text;
+  let hashtags = "#datnghiduong #dathoabinh #bdsgiare #secondhome #datnengiare";
 
-  if (!hasPhone) {
-    const firstHashtagIdx = text.search(/#[a-zA-Z0-9_À-ɏẠ-ỹ]+/);
-    if (firstHashtagIdx !== -1) {
-      const before = text.slice(0, firstHashtagIdx).trimEnd();
-      const after = text.slice(firstHashtagIdx).trim();
-      text = `${before}\n\n${HOTLINE_LINE}\n\n${after}`;
-    } else {
-      text = `${text}\n\n${HOTLINE_LINE}`;
-    }
+  const firstHashtagIdx = text.search(/#[a-zA-Z0-9_À-ɏẠ-ỹ]+/);
+  if (firstHashtagIdx !== -1) {
+    before = text.slice(0, firstHashtagIdx).trimEnd();
+    hashtags = text.slice(firstHashtagIdx).trim();
   }
 
-  // 6. Kiểm tra nếu chưa có hashtag thì tự động bổ sung bộ hashtag chuẩn
-  if (!text.includes("#")) {
-    text += "\n\n#datnghiduong #dathoabinh #bdsgiare #secondhome #datnengiare";
-  }
+  // Xóa mọi dòng thông tin người đăng hoặc hotline cũ ở cuối bài để tránh trùng lặp
+  before = before
+    .replace(/Người đăng:[^\n]+/gi, "")
+    .replace(/📞?\s*Hotline[^\n]+/gi, "")
+    .trimEnd();
+
+  text = `${before}\n\n${POSTER_INFO_LINE}\n\n${hashtags}`;
 
   return text.trim();
 }
@@ -244,8 +240,8 @@ QUY TẮC BẮT BUỘC:
    - Dòng 1: Tiêu đề thu hút, có emoji phù hợp.
    - Thân bài (2-3 đoạn ngắn): Nêu bật điểm đắt giá nhất của khu đất (không khí trong lành, view đồi xanh, sổ đỏ trao tay, full thổ cư, giá chỉ từ 1,5 - 2 triệu/m2, chỉ hơn 100 triệu một lô, ô tô vào tận đất).
    - Đoạn kết: Lời kêu gọi hành động (CTA) tự nhiên: Mời anh chị để lại bình luận hoặc nhắn tin trực tiếp để nhận thông tin sổ đỏ và vị trí thực tế.
-   - BẮT BUỘC CHÈN DÒNG LIÊN HỆ: Ở cuối đoạn kết bài, trước các hashtag, BẮT BUỘC phải có dòng thông tin liên hệ:
-     "${HOTLINE_LINE}"
+   - BẮT BUỘC CHÈN DÒNG THÔNG TIN NGƯỜI ĐĂNG: Ở cuối đoạn kết bài, trước các hashtag, BẮT BUỘC luôn có thông tin người đăng:
+${POSTER_INFO_LINE}
 3. TUYỆT ĐỐI KHÔNG dùng ký hiệu in đậm markdown (**). Không dùng tiêu đề markdown (# ). Chỉ dùng chữ thường tự nhiên kèm emoji.
 4. Cuối bài đính kèm các hashtag: #datnghiduong #dathoabinh #bdsgiare #secondhome #datnengiare
 `.trim();

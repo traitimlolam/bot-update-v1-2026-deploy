@@ -9,6 +9,45 @@ export interface ConversationRecord {
   customerName?: string | null;
   gender?: 'MALE' | 'FEMALE' | 'UNKNOWN' | null;
   avatarUrl?: string | null;
+  customerMessageCount?: number;
+}
+
+export interface PhoneCadenceResult {
+  askPhone: boolean;
+  milestone?: 1 | 2 | 3;
+}
+
+export function isDeepInquiryText(text: string): boolean {
+  const normalized = text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd');
+  return /(phap ly|thu tuc|so do|so hong|trich luc|cong chung|dat coc|giu cho|coc|xem dat|tham quan|dan di|di xem|thuc te|thuc dia)/.test(normalized);
+}
+
+/**
+ * Xác định tần suất và nhịp điệu xin số điện thoại theo 3 mốc:
+ * - Mốc 1 (Bong bóng chat thứ 3): Lần đầu xin số lịch sự kèm lý do mang lại lợi ích cho khách (sơ đồ phân lô, bảng giá chi tiết).
+ * - Mốc 2 (Tin nhắn thứ 6 của khách): Nhắc xin số lần 2 nhẹ nhàng sau khi đã giải đáp chu đáo các tin 4 và 5.
+ * - Mốc 3 (Từ tin thứ 7 trở đi): Tế nhị, chỉ hỏi khi cách 4-5 lượt chat (11, 16, 21...) hoặc khi khách hỏi sâu về thủ tục pháp lý, đặt cọc hay xem đất thực tế.
+ * - Các lượt khác (1, 2, 4, 5, hoặc các lượt >=7 không có hỏi sâu): Cờ xin số tắt (askPhone: false).
+ */
+export function getPhoneCadence(customerMessageCount: number, text: string = ''): PhoneCadenceResult {
+  if (customerMessageCount === 3) {
+    return { askPhone: true, milestone: 1 };
+  }
+  if (customerMessageCount === 6) {
+    return { askPhone: true, milestone: 2 };
+  }
+  if (customerMessageCount >= 7) {
+    const isPeriodic = (customerMessageCount - 6) % 5 === 0;
+    const isDeepInquiry = isDeepInquiryText(text);
+    if (isPeriodic || isDeepInquiry) {
+      return { askPhone: true, milestone: 3 };
+    }
+  }
+  return { askPhone: false };
 }
 
 export function newConversation(): ConversationRecord {
@@ -28,8 +67,8 @@ export type ReplyTopic = 'location' | 'legal' | 'price';
  */
 export type ReplyIntent =
   | { kind: 'AI_GREETING' }
-  | { kind: 'AI_TOPIC'; topic: ReplyTopic }
-  | { kind: 'AI_FREE_TEXT' }
+  | { kind: 'AI_TOPIC'; topic: ReplyTopic; askPhone?: boolean; milestone?: 1 | 2 | 3 }
+  | { kind: 'AI_FREE_TEXT'; askPhone?: boolean; milestone?: 1 | 2 | 3 }
   | { kind: 'AI_PHONE_CONFIRMED' }
   | { kind: 'AI_PHONE_INVALID'; errorType: PhoneErrorType }
   | { kind: 'AI_FOLLOWUP_CLOSED' };
@@ -87,6 +126,8 @@ const BUTTON_TOPIC: Record<'BTN_LOCATION' | 'BTN_LEGAL' | 'BTN_PRICE', ReplyTopi
  * trùng lặp logic chốt lead ở 2 nơi có thể lệch nhau theo thời gian.
  */
 export function processInput(current: ConversationRecord, input: FlowInput): FlowResult {
+  const nextCount = current.customerMessageCount !== undefined ? current.customerMessageCount + 1 : undefined;
+
   // CLOSED: không tạo lead mới trên tab tháng, không đổi assignedStaff, dù khách gửi thêm gì — nhưng
   // KHÔNG còn im lặng hoàn toàn như trước: trả lời (do AI viết) để trấn an khách đã bàn giao nhân
   // viên (mục 6, AC6), đồng thời quét luôn nội dung để phát hiện khách đang SỬA LẠI số điện thoại
@@ -99,7 +140,7 @@ export function processInput(current: ConversationRecord, input: FlowInput): Flo
       // Khách có thể đang cố sửa số nhưng gõ sai định dạng -> báo lỗi để sửa đúng ở lượt sau, tuyệt
       // đối không đụng Sheet (mục 7 điểm 6) — không copy sang "Hỏi lại" ở nhánh này.
       return {
-        record: current,
+        record: { ...current, ...(nextCount !== undefined ? { customerMessageCount: nextCount } : {}) },
         messagesToSend: [{ kind: 'AI_PHONE_INVALID', errorType: phoneCheck.errorType }],
         leadPhone: null,
         correctedPhone: null,
@@ -114,7 +155,11 @@ export function processInput(current: ConversationRecord, input: FlowInput): Flo
         : null;
 
     return {
-      record: correctedPhone ? { ...current, phone: correctedPhone } : current,
+      record: {
+        ...current,
+        ...(correctedPhone ? { phone: correctedPhone } : {}),
+        ...(nextCount !== undefined ? { customerMessageCount: nextCount } : {})
+      },
       messagesToSend: [{ kind: 'AI_FOLLOWUP_CLOSED' }],
       leadPhone: null,
       correctedPhone,
@@ -124,7 +169,11 @@ export function processInput(current: ConversationRecord, input: FlowInput): Flo
 
   if (input.type === 'BUTTON') {
     return {
-      record: { ...current, state: 'IN_PROGRESS' },
+      record: {
+        ...current,
+        state: 'IN_PROGRESS',
+        ...(nextCount !== undefined ? { customerMessageCount: nextCount } : {})
+      },
       messagesToSend: [{ kind: 'AI_TOPIC', topic: BUTTON_TOPIC[input.payload] }],
       leadPhone: null,
       correctedPhone: null,
@@ -144,6 +193,7 @@ export function processInput(current: ConversationRecord, input: FlowInput): Flo
       phone: phoneCheck.normalizedPhone,
       assignedStaff: current.assignedStaff,
       customerName: current.customerName ?? null,
+      ...(nextCount !== undefined ? { customerMessageCount: nextCount } : {})
     };
     return {
       record,
@@ -157,7 +207,10 @@ export function processInput(current: ConversationRecord, input: FlowInput): Flo
   if (phoneCheck.errorType !== null) {
     // Sai định dạng: báo lỗi (do AI viết), tuyệt đối không ghi Sheet, state giữ nguyên (mục 5.2, 7, 8).
     return {
-      record: current,
+      record: {
+        ...current,
+        ...(nextCount !== undefined ? { customerMessageCount: nextCount } : {})
+      },
       messagesToSend: [{ kind: 'AI_PHONE_INVALID', errorType: phoneCheck.errorType }],
       leadPhone: null,
       correctedPhone: null,
@@ -170,7 +223,11 @@ export function processInput(current: ConversationRecord, input: FlowInput): Flo
   // đầu (NEW) hay nhắn thêm/hỏi lại (IN_PROGRESS), vì không còn tin chào M1 cố định để phân biệt 2
   // trường hợp này nữa.
   return {
-    record: { ...current, state: 'IN_PROGRESS' },
+    record: {
+      ...current,
+      state: 'IN_PROGRESS',
+      ...(nextCount !== undefined ? { customerMessageCount: nextCount } : {})
+    },
     messagesToSend: [{ kind: 'AI_FREE_TEXT' }],
     leadPhone: null,
     correctedPhone: null,

@@ -1,4 +1,4 @@
-import { processInput, newConversation, ConversationRecord } from '../src/flow/flowEngine';
+import { processInput, newConversation, ConversationRecord, getPhoneCadence } from '../src/flow/flowEngine';
 
 describe('flowEngine.processInput', () => {
   describe('quick-reply buttons (mục 5.2)', () => {
@@ -204,4 +204,55 @@ describe('flowEngine.processInput', () => {
       expect(result.record.state).toBe('NEW');
     });
   });
+  describe('quy tắc 3 mốc xin số điện thoại theo lượt tin nhắn (getPhoneCadence)', () => {
+    it('lượt 1 và lượt 2: chưa xin số (khách mới bắt đầu trao đổi câu cơ bản)', () => {
+      expect(getPhoneCadence(1, 'alo em')).toEqual({ askPhone: false });
+      expect(getPhoneCadence(2, 'dat o dau em')).toEqual({ askPhone: false });
+    });
+
+    it('Mốc 1 (Bong bóng chat thứ 3): lịch sự xin số điện thoại/Zalo lần đầu', () => {
+      expect(getPhoneCadence(3, 'gia the nao em')).toEqual({ askPhone: true, milestone: 1 });
+    });
+
+    it('lượt 4 và lượt 5: nhiệt tình giải đáp đúng trọng tâm câu hỏi, tuyệt đối không xin dồn dập', () => {
+      expect(getPhoneCadence(4, 'duong vao rong bao nhieu')).toEqual({ askPhone: false });
+      expect(getPhoneCadence(5, 'co gan cho khong em')).toEqual({ askPhone: false });
+    });
+
+    it('Mốc 2 (Tin nhắn thứ 6 của khách): lịch sự nhắc xin số lần thứ 2 nhẹ nhàng', () => {
+      expect(getPhoneCadence(6, 'dien nuoc co san khong')).toEqual({ askPhone: true, milestone: 2 });
+    });
+
+    it('Mốc 3 (Từ tin thứ 7 trở đi - câu hỏi thường): tuyệt đối không xin dồn dập, cờ tắt', () => {
+      expect(getPhoneCadence(7, 'khu nay dong dan cu khong')).toEqual({ askPhone: false });
+      expect(getPhoneCadence(8, 'cach trung tam bao xa')).toEqual({ askPhone: false });
+      expect(getPhoneCadence(9, 'xung quanh co truong hoc khong')).toEqual({ askPhone: false });
+      expect(getPhoneCadence(10, 'co gan tram y te khong')).toEqual({ askPhone: false });
+    });
+
+    it('Mốc 3 (Từ tin thứ 7 trở đi - chu kỳ 4-5 lượt chat): bật cờ nhắc nhẹ ở lượt 11, 16', () => {
+      expect(getPhoneCadence(11, 'hoi them chut nua')).toEqual({ askPhone: true, milestone: 3 });
+      expect(getPhoneCadence(12, 'hoi tiep')).toEqual({ askPhone: false });
+      expect(getPhoneCadence(16, 'hoi tiep lan nua')).toEqual({ askPhone: true, milestone: 3 });
+    });
+
+    it('Mốc 3 (Từ tin thứ 7 trở đi - khách hỏi sâu về thủ tục pháp lý, đặt cọc, xem đất thực tế): bật cờ xin số ngay', () => {
+      expect(getPhoneCadence(7, 'thu tuc phap ly the nao em, co so do chua')).toEqual({ askPhone: true, milestone: 3 });
+      expect(getPhoneCadence(8, 'muon dat coc giu cho thi lam the nao')).toEqual({ askPhone: true, milestone: 3 });
+      expect(getPhoneCadence(9, 'cuoi tuan dan anh di xem dat thuc te nhe')).toEqual({ askPhone: true, milestone: 3 });
+    });
+
+    it('processInput tăng customerMessageCount chính xác khi được truyền vào', () => {
+      const turn0: ConversationRecord = { state: 'NEW', phone: null, assignedStaff: null, customerMessageCount: 0 };
+      const turn1 = processInput(turn0, { type: 'TEXT', text: 'alo em' });
+      expect(turn1.record.customerMessageCount).toBe(1);
+
+      const turn2 = processInput(turn1.record, { type: 'TEXT', text: 'dat o dau' });
+      expect(turn2.record.customerMessageCount).toBe(2);
+
+      const turn3 = processInput(turn2.record, { type: 'TEXT', text: 'cho anh gia' });
+      expect(turn3.record.customerMessageCount).toBe(3);
+    });
+  });
+
 });

@@ -68,11 +68,12 @@ MỤC ĐÍCH CUỐI CÙNG của mọi câu trả lời KHÔNG PHẢI là giải 
 - Tin nhắn 1: Trả lời thẳng, ngắn gọn đúng trọng tâm câu hỏi của khách (vị trí, giá, pháp lý).
 - Tin nhắn 2: Gợi mở hoặc hỗ trợ bước tiếp theo.
 
-2. Quy tắc xin số điện thoại khéo léo & tiết chế tần suất (giống người thật 100%):
-- Trong TOÀN BỘ cuộc trò chuyện, bot CHỈ ĐƯỢC XIN SỐ TỐI ĐA 1 ĐẾN 2 LẦN. Tuyệt đối không câu nào cũng gài câu xin số khiến khách cảm thấy bị làm phiền, gượng gạo và vồ vập.
-- Khi khách đang hỏi về các thông tin cơ bản (vị trí ở đâu, giá bán thế nào, đường đi ra sao, pháp lý sổ sách): Bot CHỈ tập trung giải đáp nhiệt tình, ngắn gọn, đi thẳng vào câu hỏi của khách, TUYỆT ĐỐI KHÔNG gài thêm câu xin số ở mọi lượt chat.
-- CHỈ KHI NÀO khách thể hiện sự quan tâm sâu sắc (ví dụ: muốn xem bảng giá chi tiết từng lô, muốn xem sơ đồ phân lô, hỏi thủ tục công chứng sang tên, hoặc hỏi xem đất thực tế): Bot mới đưa ra 1 lý do chính đáng và mang lại lợi ích cụ thể cho khách để mời khách để lại số Zalo/điện thoại gửi tài liệu qua.
-- NẾU Ở LƯỢT CHAT TRƯỚC bot đã xin số mà khách lờ đi và hỏi sang câu khác: Ở lượt này bot TUYỆT ĐỐI KHÔNG ĐƯỢC XIN LẠI NỮA, chỉ tập trung giải đáp chu đáo câu hỏi mới của khách.
+2. Quy tắc xin số điện thoại khéo léo & kiểm soát chặt theo cờ từ hệ thống:
+- BẮT BUỘC TUÂN THỦ CỜ XIN SỐ TỪ HỆ THỐNG: Bot CHỈ ĐƯỢC PHÉP xin số điện thoại/Zalo khi trong hướng dẫn "Sự kiện" ở tin nhắn cuối cùng có CỜ XIN SỐ: BẬT. Nếu CỜ XIN SỐ: TẮT hoặc không yêu cầu, bot TUYỆT ĐỐI KHÔNG được gài câu xin số hay gợi ý để lại số, mà phải tập trung 100% giải đáp câu hỏi của khách một cách nhiệt tình, chính xác và tự nhiên.
+- Quy tắc 3 mốc xin số của hệ thống:
+  + Mốc 1 (Tại tin nhắn thứ 3 của khách): Lần đầu tiên xin số lịch sự kèm lý do chính đáng mang lại lợi ích cho khách (ví dụ: gửi sơ đồ phân lô, bảng giá chi tiết).
+  + Mốc 2 (Tại tin nhắn thứ 6 của khách): Nhắc xin số lần thứ 2 nhẹ nhàng sau khi đã giải đáp chu đáo các tin 4 và 5.
+  + Mốc 3 (Từ tin thứ 7 trở đi): Tuyệt đối không xin dồn dập; chỉ nhắc nhẹ khi khách hỏi sâu về thủ tục pháp lý, đặt cọc, xem đất thực tế hoặc đúng chu kỳ hệ thống bật cờ.
 - Không được vồ vập, không hỏi xin số cộc lốc kiểu "cho em xin số điện thoại".
 - Việc CÓ mời khách để lại số điện thoại/Zalo hay không, và mời như thế nào, PHẢI làm ĐÚNG theo hướng dẫn nêu trong phần "Sự kiện" ở tin nhắn cuối cùng — không tự ý thêm lời mời để lại số nếu "Sự kiện" không yêu cầu, và không được quên nếu "Sự kiện" yêu cầu bắt buộc.
 
@@ -124,26 +125,66 @@ const PHONE_CTA_HINT =
   'Quy tắc xin số: Khi khách hỏi sâu hoặc câu hỏi phù hợp để gửi thêm tài liệu (bảng giá chi tiết, sơ đồ phân lô, xem đất thực tế), hãy khéo léo mời khách để lại số Zalo/điện thoại để bên em gửi qua. TUY NHIÊN: Nếu khách chỉ hỏi thông tin cơ bản, hoặc trong các câu chat gần nhất bot đã từng xin số mà khách lờ đi hỏi câu khác, TUYỆT ĐỐI KHÔNG xin lại số dồn dập ở lượt này — chỉ tập trung trả lời đúng trọng tâm câu hỏi mới và giải đáp nhiệt tình, tự nhiên.';
 
 /**
- * Dịch 1 `ReplyIntent` (mục 4.2 mở rộng, `flow/flowEngine.ts`) + ngữ cảnh của lượt hiện tại thành
- * hướng dẫn cụ thể, ghép vào tin nhắn "user" cuối cùng gửi cho model — KHÔNG đưa vào system
- * instruction (giữ `buildSystemInstruction` thuần/arity 1, test được độc lập — mục 13). Export để
- * unit test độc lập được việc CHỈ đúng 2 intent (AI_TOPIC/AI_FREE_TEXT) mang theo `PHONE_CTA_HINT`,
- * 3 intent còn lại tuyệt đối không (mục 13).
+ * Tạo chỉ dẫn xin số điện thoại theo đúng 3 mốc:
+ * - Mốc 1 (Bong bóng chat thứ 3): Lần đầu xin số lịch sự kèm lý do mang lại lợi ích.
+ * - Mốc 2 (Tin nhắn thứ 6 của khách): Nhắc xin số lần 2 nhẹ nhàng.
+ * - Mốc 3 (Từ tin thứ 7 trở đi): Tế nhị, chỉ hỏi khi sâu hoặc cách 4-5 lượt.
+ * - Cờ TẮT: Tuyệt đối không xin số.
  */
-export function describeIntent(intent: ReplyIntent, userText: string, isNewCustomer: boolean): string {
+export function buildPhoneGuidance(askPhone?: boolean, milestone?: 1 | 2 | 3): string {
+  if (askPhone === false) {
+    return '[CỜ XIN SỐ: TẮT - TUYỆT ĐỐI KHÔNG XIN SỐ Ở LƯỢT NÀY. Chỉ tập trung giải đáp nhiệt tình, chính xác và tự nhiên câu hỏi của khách. Tuyệt đối KHÔNG hỏi số điện thoại, số Zalo hay gợi ý để lại số.]';
+  }
+  if (askPhone === true) {
+    if (milestone === 1) {
+      return '[CỜ XIN SỐ: BẬT - MỐC 1 (tin nhắn thứ 3 của khách): Sau khi giải đáp thắc mắc, hãy bắt đầu lịch sự xin số điện thoại/Zalo lần đầu tiên kèm một lý do chính đáng và mang lại lợi ích thiết thực cho khách (ví dụ: Em có sẵn sơ đồ phân lô và bảng giá chi tiết từng vị trí, anh/chị cho em xin số Zalo để em gửi qua cho mình tiện xem nhé). Mời khách để lại số Zalo/điện thoại một cách tự nhiên và lịch sự.]';
+    }
+    if (milestone === 2) {
+      return '[CỜ XIN SỐ: BẬT - MỐC 2 (tin nhắn thứ 6 của khách): Sau khi giải đáp nhiệt tình đúng trọng tâm câu hỏi của khách, hãy lịch sự nhắc xin số Zalo/điện thoại lần thứ 2 một cách nhẹ nhàng (ví dụ: để gửi tài liệu quy hoạch, bảng giá và bản đồ trích lục mới nhất). Mời khách để lại số Zalo/điện thoại.]';
+    }
+    if (milestone === 3) {
+      return '[CỜ XIN SỐ: BẬT - MỐC 3 (tế nhị, từ tin thứ 7 trở đi): Khách đang hỏi sâu hoặc đến nhịp nhắc nhẹ. Hãy giải đáp chu đáo câu hỏi trước, sau đó mở lời nhắc nhẹ nhàng một lần mời kết nối Zalo/điện thoại để hỗ trợ thủ tục pháp lý, gửi trích lục sổ hoặc sắp xếp xe đưa đón xem đất thực tế miễn phí.]';
+    }
+    return '[CỜ XIN SỐ: BẬT: Hãy khéo léo mời khách để lại số Zalo/điện thoại để bên em gửi tài liệu chi tiết qua.]';
+  }
+  return PHONE_CTA_HINT;
+}
+
+/**
+ * Dịch 1 `ReplyIntent` (mục 4.2 mở rộng, `flow/flowEngine.ts`) + ngữ cảnh của lượt hiện tại thành
+ * hướng dẫn cụ thể, ghép vào tin nhắn "user" cuối cùng gửi cho model.
+ */
+export function describeIntent(
+  intent: ReplyIntent,
+  userText: string,
+  isNewCustomer: boolean,
+  overrideAskPhone?: boolean,
+  overrideMilestone?: 1 | 2 | 3
+): string {
+  const askPhone =
+    overrideAskPhone !== undefined
+      ? overrideAskPhone
+      : 'askPhone' in intent
+      ? (intent as any).askPhone
+      : undefined;
+  const milestone =
+    overrideMilestone !== undefined
+      ? overrideMilestone
+      : 'milestone' in intent
+      ? (intent as any).milestone
+      : undefined;
+
+  const phoneHint = buildPhoneGuidance(askPhone, milestone);
+
   switch (intent.kind) {
     case 'AI_GREETING':
       return 'Sự kiện: khách vừa mở cửa sổ chat lần đầu, CHƯA nói/hỏi gì cả. Viết đúng 1 câu chào ngắn, thân thiện, tự nhiên theo đúng giới tính quy định ở trên (nếu là anh thì chào anh, nếu là chị thì chào chị, chỉ dùng anh/chị khi không xác định được giới tính) — không cần hỏi han hay giới thiệu gì thêm vì bên dưới tin này đã có sẵn 3 nút bấm chủ đề cho khách chọn. TUYỆT ĐỐI KHÔNG hỏi số điện thoại/Zalo ở bước này, còn quá sớm.';
     case 'AI_TOPIC':
-      // Nút bấm chỉ có thể xuất hiện SAU khi khách đã nhận tin chào mở màn kèm 3 nút (mục 5.1,
-      // handleFirstOpen gửi AI_GREETING riêng trước đó) -> AI_TOPIC không bao giờ cần tự chào lại,
-      // kể cả lần bấm nút đầu tiên. Trước đây chèn GREETING_HINT vô điều kiện ở đây khiến khách bấm
-      // nút chủ đề thứ 2 trở đi (sau khi đã trò chuyện) vẫn bị AI chào lại từ đầu — sai (mục 4.2).
-      return `Sự kiện: ${TOPIC_LABEL[intent.topic]}. Trả lời đúng trọng tâm câu hỏi này, dựa hoàn toàn vào THÔNG TIN DỰ ÁN bên dưới. ${PHONE_CTA_HINT}`;
+      return `Sự kiện: ${TOPIC_LABEL[intent.topic]}. Trả lời đúng trọng tâm câu hỏi này, dựa hoàn toàn vào THÔNG TIN DỰ ÁN bên dưới. ${phoneHint}`;
     case 'AI_FREE_TEXT':
       return `Sự kiện: khách vừa nhắn/bình luận tự do, nguyên văn: "${userText}". ${
         isNewCustomer ? GREETING_HINT : ''
-      } Trả lời đúng trọng tâm nội dung này, dựa hoàn toàn vào THÔNG TIN DỰ ÁN bên dưới. ${PHONE_CTA_HINT}`;
+      } Trả lời đúng trọng tâm nội dung này, dựa hoàn toàn vào THÔNG TIN DỰ ÁN bên dưới. ${phoneHint}`;
     case 'AI_PHONE_CONFIRMED':
       return 'Sự kiện: khách VỪA ĐỂ LẠI SỐ ĐIỆN THOẠI hợp lệ. Viết đúng 1 câu ngắn cảm ơn và xác nhận đã nhận được số, báo nhân viên tư vấn sẽ liên hệ với khách ngay. TUYỆT ĐỐI KHÔNG hỏi lại số điện thoại/Zalo vì đã có rồi.';
     case 'AI_PHONE_INVALID':
@@ -167,6 +208,8 @@ export interface GenerateAiReplyParams {
   /** true nếu đây là lượt trả lời đầu tiên gửi cho khách này (mục 5.2: chỉ NEW mới cần chào). */
   isNewCustomer: boolean;
   knownGender?: Gender | null;
+  shouldAskPhone?: boolean;
+  phoneMilestone?: 1 | 2 | 3;
 }
 
 /**
@@ -190,13 +233,20 @@ export async function generateAiReply(params: GenerateAiReplyParams): Promise<st
 
   try {
     return await withRetry(async () => {
-    // Phân tích lịch sử hội thoại để kiểm soát tần suất xin số & chống lặp:
-    const phoneAskCount = history.filter(
-      (h) => h.role === 'model' && /(số zalo|số điện thoại|sđt|inbox số|gửi số|để lại số)/i.test(h.text)
-    ).length;
+    const shouldAskPhone =
+      params.shouldAskPhone !== undefined
+        ? params.shouldAskPhone
+        : 'askPhone' in intent
+        ? (intent as any).askPhone
+        : undefined;
+    const phoneMilestone =
+      params.phoneMilestone !== undefined
+        ? params.phoneMilestone
+        : 'milestone' in intent
+        ? (intent as any).milestone
+        : undefined;
 
-    const lastModelTurn = [...history].reverse().find((h) => h.role === 'model');
-    const lastAskedPhone = lastModelTurn && /(số zalo|số điện thoại|sđt|gửi số|để lại số)/i.test(lastModelTurn.text);
+    // Phân tích lịch sử hội thoại để kiểm soát tần suất xin số & chống lặp:
     const alreadyGreeted = history.some(
       (h) => h.role === 'model' && /(xin chào|chào anh|chào chị|em chào)/i.test(h.text)
     );
@@ -206,10 +256,16 @@ export async function generateAiReply(params: GenerateAiReplyParams): Promise<st
       historyGuidance += ' [QUY TẮC CHỐNG LẶP: Bot đã chào khách ở các lượt trước, tuyệt đối KHÔNG chào lại, không mở đầu bằng câu chào xã giao, đi thẳng vào câu trả lời.]';
     }
 
-    if (phoneAskCount >= 2) {
-      historyGuidance += ' [QUY TẮC XIN SỐ: Bot đã xin số đủ 2 lần trong cuộc hội thoại. Ở lượt này TUYỆT ĐỐI KHÔNG xin số nữa, chỉ tập trung giải đáp câu hỏi.]';
-    } else if (lastAskedPhone) {
-      historyGuidance += ' [QUY TẮC XIN SỐ: Lượt trước bot đã xin số nhưng khách chưa cho và hỏi nội dung khác. Lượt này TUYỆT ĐỐI KHÔNG XIN LẠI SỐ, chỉ trả lời câu hỏi mới của khách.]';
+    if (shouldAskPhone === false) {
+      historyGuidance += ' [KIỂM SOÁT TẦN SUẤT: Lớp kiểm soát luồng đã TẮT cờ xin số ở lượt này. TUYỆT ĐỐI KHÔNG xin số điện thoại/Zalo, chỉ tập trung trả lời đúng trọng tâm câu hỏi của khách.]';
+    } else if (shouldAskPhone === true) {
+      if (phoneMilestone === 1) {
+        historyGuidance += ' [KIỂM SOÁT TẦN SUẤT: MỐC 1 (tin 3 của khách). Lịch sự xin số Zalo/điện thoại lần đầu tiên kèm lý do mang lại lợi ích thiết thực (sơ đồ phân lô/bảng giá).]';
+      } else if (phoneMilestone === 2) {
+        historyGuidance += ' [KIỂM SOÁT TẦN SUẤT: MỐC 2 (tin 6 của khách). Lịch sự nhắc xin số lần 2 nhẹ nhàng sau khi đã giải đáp chu đáo các tin 4 và 5.]';
+      } else if (phoneMilestone === 3) {
+        historyGuidance += ' [KIỂM SOÁT TẦN SUẤT: MỐC 3 (tế nhị, từ tin thứ 7 trở đi). Khách hỏi sâu hoặc đến nhịp nhắc nhẹ. Mở lời nhắc nhẹ một lần mời kết nối Zalo/điện thoại.]';
+      }
     }
 
     const messages = [
@@ -218,7 +274,7 @@ export async function generateAiReply(params: GenerateAiReplyParams): Promise<st
         role: turn.role === 'model' ? 'assistant' : 'user',
         content: turn.text,
       })),
-      { role: 'user', content: describeIntent(intent, userText, isNewCustomer) + historyGuidance },
+      { role: 'user', content: describeIntent(intent, userText, isNewCustomer, shouldAskPhone, phoneMilestone) + historyGuidance },
     ];
 
     const response = await fetch(`${ROUTER_BASE_URL}/chat/completions`, {

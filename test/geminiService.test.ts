@@ -126,4 +126,30 @@ describe('geminiService.describeIntent (mục 4.2)', () => {
     expect(newCustomerInstruction).toMatch(/lời chào ngắn/i);
     expect(returningCustomerInstruction).not.toMatch(/lời chào ngắn/i);
   });
+  describe("quy tắc kiểm soát cờ xin số theo từng lượt (describeIntent)", () => {
+    it("khi cờ xin số TẮT (askPhone=false) -> AI tuyệt đối không xin số điện thoại/Zalo", () => {
+      const instruction = describeIntent({ kind: "AI_FREE_TEXT" }, "duong vao rong bao nhieu", false, false);
+      expect(instruction).toContain("CỜ XIN SỐ: TẮT - TUYỆT ĐỐI KHÔNG XIN SỐ Ở LƯỢT NÀY");
+      expect(instruction).toMatch(/tuyệt đối không hỏi số điện thoại, số zalo/i);
+    });
+
+    it("khi cờ xin số BẬT ở Mốc 1 (milestone=1) -> nhắc xin số lần đầu kèm lợi ích sơ đồ phân lô, bảng giá", () => {
+      const instruction = describeIntent({ kind: "AI_FREE_TEXT" }, "gia the nao", false, true, 1);
+      expect(instruction).toContain("CỜ XIN SỐ: BẬT - MỐC 1");
+      expect(instruction).toContain("sơ đồ phân lô và bảng giá chi tiết");
+    });
+
+    it("khi cờ xin số BẬT ở Mốc 2 (milestone=2) -> nhắc xin số lần thứ 2 nhẹ nhàng", () => {
+      const instruction = describeIntent({ kind: "AI_FREE_TEXT" }, "dien nuoc the nao", false, true, 2);
+      expect(instruction).toContain("CỜ XIN SỐ: BẬT - MỐC 2");
+      expect(instruction).toContain("lần thứ 2 một cách nhẹ nhàng");
+    });
+
+    it("khi cờ xin số BẬT ở Mốc 3 (milestone=3) -> nhắc nhẹ tế nhị hỗ trợ thủ tục pháp lý, xe xem đất", () => {
+      const instruction = describeIntent({ kind: "AI_FREE_TEXT" }, "thu tuc phap ly the nao", false, true, 3);
+      expect(instruction).toContain("CỜ XIN SỐ: BẬT - MỐC 3");
+      expect(instruction).toContain("thủ tục pháp lý");
+    });
+  });
+
 });

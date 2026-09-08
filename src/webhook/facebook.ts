@@ -9,6 +9,7 @@ import {
   OutgoingMessage,
   processInput,
   ReplyIntent,
+  getPhoneCadence,
 } from '../flow/flowEngine';
 import { checkPhone, PhoneErrorType } from '../flow/phoneValidator';
 import {
@@ -174,7 +175,9 @@ async function resolveIntentText(
   history: AiHistoryEntry[],
   customerName: string | null,
   isNewCustomer: boolean,
-  knownGender?: Gender | null
+  knownGender?: Gender | null,
+  shouldAskPhone?: boolean,
+  phoneMilestone?: 1 | 2 | 3
 ): Promise<{ text: string; updatedHistory?: AiHistoryEntry[] }> {
   const shouldPersistHistory = intent.kind === 'AI_TOPIC' || intent.kind === 'AI_FREE_TEXT';
 
@@ -186,6 +189,8 @@ async function resolveIntentText(
       customerName,
       isNewCustomer,
       knownGender,
+      shouldAskPhone,
+      phoneMilestone,
     });
     return {
       text: replyText,
@@ -305,6 +310,8 @@ export async function runFlowTurn(
 ): Promise<void> {
   await withLock(`psid:${psid}`, async () => {
     const current = await loadOrCreateConversation(psid);
+    const customerMessageCount = (current.customerMessageCount ?? 0) + 1;
+    current.customerMessageCount = customerMessageCount;
     // mục 5.2: chỉ khách NEW mới cần AI chào ở đầu câu trả lời.
     const isNewCustomer = current.state === 'NEW';
     // `commentId` khác null khi lượt này đến từ 1 bình luận (mục 5.3) — dùng để chọn recipient khi
@@ -372,16 +379,20 @@ export async function runFlowTurn(
           : result.messagesToSend;
 
         let updatedAiHistory: AiHistoryEntry[] | undefined;
+        const phoneCadence = getPhoneCadence(customerMessageCount, userText);
         const intentResolver = async (intent: ReplyIntent) => {
           // Đã tách chào thành tin riêng ở trên -> tin nội dung còn lại không cần AI tự chào lại nữa.
           const effectiveIsNewCustomer = shouldSplitGreeting ? false : isNewCustomer;
+
           const { text, updatedHistory } = await resolveIntentText(
             intent,
             userText,
             current.aiHistory ?? [],
             customerName,
             effectiveIsNewCustomer,
-            gender
+            gender,
+            phoneCadence.askPhone,
+            phoneCadence.milestone
           );
           if (updatedHistory) updatedAiHistory = updatedHistory;
           return text;
@@ -403,6 +414,7 @@ export async function runFlowTurn(
 
     let finalRecord: ConversationRecord = {
       ...result.record,
+      customerMessageCount,
       customerName: customerName ?? current.customerName ?? null,
       gender: gender ?? current.gender ?? null,
       avatarUrl: avatarUrl ?? current.avatarUrl ?? null,
@@ -862,7 +874,7 @@ async function handleFirstCommentWithoutPhone(
     const intentResolver = async (intent: ReplyIntent) => {
       // isNewCustomer luôn false: lời chào đã tách thành tin AI_GREETING riêng (item đầu tiên gửi đi
       // ở dưới), tin AI_FREE_TEXT theo sau không cần AI tự chào lại nữa.
-      const { text } = await resolveIntentText(intent, commentText, [], customerName ?? null, false);
+      const { text } = await resolveIntentText(intent, commentText, [], customerName ?? null, false, null, false);
       if (intent.kind === 'AI_FREE_TEXT') replyText = text;
       return text;
     };
