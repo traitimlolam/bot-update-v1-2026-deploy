@@ -38,6 +38,8 @@ export interface LeadInput {
    * (không truyền) nếu không lấy được PSID — cột H sẽ để trống, không ghi gì.
    */
   psid?: string;
+  /** Cột H: Thread ID (inbox item ID) trong Meta Business Suite nếu đã có sẵn. */
+  threadId?: string;
 }
 
 function formatDateDDMM(date: Date): string {
@@ -321,6 +323,30 @@ async function findLastValidAssignmentAcrossTabs(
  * retry cả hàm: `rowNumber` chỉ được xác định 1 lần rồi tái sử dụng, nên nếu bước ghi cột F thất bại
  * và phải thử lại, bước ghi cột A-C KHÔNG bị lặp lại vào dòng mới (tránh trùng lead khi retry).
  */
+/**
+ * Lấy threadId (inbox item ID) từ Graph API để tạo URL mở đúng cuộc trò chuyện trong Meta Business Suite.
+ * Graph API: GET /me/conversations?user_id=${psid}&fields=id,link
+ * link trả về có dạng: "/{page_id}/inbox/{thread_id}/?section=messages"
+ */
+export async function resolveFacebookThreadId(psid: string): Promise<string | null> {
+  const pageAccessToken = process.env.FB_PAGE_ACCESS_TOKEN;
+  if (!pageAccessToken) return null;
+
+  try {
+    const url = `https://graph.facebook.com/v19.0/me/conversations?user_id=${psid}&fields=id,link&access_token=${pageAccessToken}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = (await res.json()) as { data?: Array<{ link?: string }> };
+    const link = data.data?.[0]?.link;
+    if (!link) return null;
+    const match = link.match(/\/inbox\/(\d+)\//);
+    return match ? match[1] : null;
+  } catch (err) {
+    console.error('[resolveFacebookThreadId] Lỗi khi lấy threadId từ Graph API:', err);
+    return null;
+  }
+}
+
 export async function appendLead(lead: LeadInput): Promise<string> {
   const spreadsheetId = process.env.GOOGLE_SHEET_ID;
   if (!spreadsheetId) {
@@ -361,9 +387,14 @@ export async function appendLead(lead: LeadInput): Promise<string> {
     // Sheet parse chuỗi "=HYPERLINK(...)" thành công thức bấm được thay vì ghi y nguyên dạng text.
     // Bắt buộc phải có cả asset_id (Fanpage) và thread_type — thiếu 1 trong 2, Meta Business Suite sẽ
     // không định tuyến được và luôn mở nhầm cuộc trò chuyện đầu tiên trong danh sách thay vì đúng khách.
-    if (lead.psid) {
+    if (lead.psid || lead.threadId) {
+      let targetItemId = lead.threadId;
+      if (!targetItemId && lead.psid) {
+        targetItemId = (await resolveFacebookThreadId(lead.psid)) || lead.psid;
+      }
+      // Dùng dấu chấm phẩy ; cho Google Sheet locale vi_VN để tránh lỗi cú pháp #ERROR!
       const hyperlinkFormula =
-        `=HYPERLINK("https://business.facebook.com/latest/inbox/all?asset_id=${FB_PAGE_ID}&selected_item_id=${lead.psid}&thread_type=FB_MESSAGE", ` +
+        `=HYPERLINK("https://business.facebook.com/latest/inbox/all?asset_id=${FB_PAGE_ID}&selected_item_id=${targetItemId}&thread_type=FB_MESSAGE"; ` +
         `"Link chat trực tiếp với khách trên Facebook")`;
       await withRetry(() =>
         sheets.spreadsheets.values.update({
