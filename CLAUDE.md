@@ -535,3 +535,14 @@ Thực hiện lần lượt, mỗi bước commit riêng, có test trước khi 
   - Bài viết về pháp lý, giá trị đất, quy hoạch cao tốc, đầu tư tích sản $\rightarrow$ Nhóm 2 (`INFRASTRUCTURE`).
   - Bài viết về văn hóa, lễ hội, cồng chiêng, nhà sàn, ẩm thực $\rightarrow$ Nhóm 3 (`CULTURE`).
 - **Tiêu chuẩn kỹ thuật ảnh:** 100% URL trực tiếp (.jpg/.png), phân giải cao $\ge 1200px$, CDN ổn định, không watermark, gắn mã chống cache (`?sig=`).
+
+### 15.8. Cơ chế chống trùng lặp Webhook, Debounce PSID & Khống chế bong bóng tin nhắn
+- **Sự cố thực tế:** Khách Nguyễn Thuỷ bấm quảng cáo Facebook, Meta gửi đồng thời nhiều webhook (7ms apart) và retry do webhook xử lý lâu, kết hợp logic `shouldSplitGreeting` tách 1 turn thành 2 intent (`AI_GREETING` + `AI_FREE_TEXT`) khiến bot gửi liên tiếp 8 tin nhắn lặp nội dung.
+- **Khắc phục triệt để:**
+  1. **Idempotency (chống retry cùng `mid`):** Cache `processedMids` (TTL 10 phút), hàm `isDuplicateMid(mid)` bỏ qua ngay lập tức nếu `mid` đã từng được tiếp nhận.
+  2. **Debounce theo PSID (chống bão webhook quảng cáo):** Cache `lastProcessedAtByPsid`, hàm `isPsidDebounced(psid, 3000)` bỏ qua mọi sự kiện tiếp theo từ cùng 1 PSID trong vòng 3 giây, chỉ xử lý sự kiện đầu tiên.
+  3. **Khóa đồng bộ per-PSID:** Cả `handleFirstOpen` và `runFlowTurn` đều được bọc trong `withLock(\`psid:${psid}\`)` đảm bảo không bao giờ có 2 tiến trình trả lời chạy song song cho cùng 1 khách.
+  4. **Quy tắc 1 Intent duy nhất:** Xóa bỏ hoàn toàn `shouldSplitGreeting`. Mỗi lượt chat chỉ gửi đúng 1 intent (`result.messagesToSend.slice(0, 1)`). AI tự nhận biết `isNewCustomer` để chèn lời chào ngắn gọn ngay đầu câu trả lời nếu là khách mới.
+  5. **Khống chế cứng bong bóng tin nhắn:**
+     - `splitMessageIntoBubbles`: Tối đa 2 đến 3 bong bóng. Nếu nội dung dài, tự động gộp các câu lại (giữ câu CTA/xin số ở bong bóng thứ 3), cấm băm thành 4-5 tin nhắn vụn.
+     - `sendMessageSequence`: Biến `MAX_BUBBLES_PER_TURN = 3` ngắt vòng lặp gửi ngay khi đạt ngưỡng tối đa 3 bong bóng trong 1 lượt chat.
