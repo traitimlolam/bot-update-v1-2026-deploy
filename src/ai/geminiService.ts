@@ -48,15 +48,33 @@ export function buildSystemInstruction(customerName: string | null, knownGender:
   const gender = knownGender && knownGender !== 'UNKNOWN' ? knownGender : analyzedGender;
 
   let pronounRule: string;
-  if (gender === 'MALE') {
-    pronounRule = `Bộ lọc giới tính xác định khách là NAM: Bắt buộc xưng "em", gọi khách là "anh"${callName ? ` hoặc "anh ${callName}"` : ''}. Tuyệt đối KHÔNG dùng "anh/chị".`;
-  } else if (gender === 'FEMALE') {
-    pronounRule = `Bộ lọc giới tính xác định khách là NỮ: Bắt buộc xưng "em", gọi khách là "chị"${callName ? ` hoặc "chị ${callName}"` : ''}. Tuyệt đối KHÔNG dùng "anh/chị".`;
+  if (gender === 'FEMALE') {
+    pronounRule = `[CHỈ THỊ TỐI CAO VỀ XƯNG HÔ - KHÓA CỨNG 100%]
+Khách hàng này đã được xác nhận 100% là NỮ${callName ? `, tên gọi là "${callName}"` : ''}${customerName ? ` (họ tên đầy đủ: "${customerName}")` : ''}.
+Bạn BẮT BUỘC phải xưng "em" và gọi khách là "chị"${callName ? ` hoặc "chị ${callName}"` : ''} trong TẤT CẢ các câu trả lời.
+TUYỆT ĐỐI CẤM đổi cách xưng hô sang "anh", "anh/chị", "bạn", hoặc gọi cộc lốc bằng tên riêng${callName ? ` "${callName}"` : ''} ở bất kỳ thời điểm nào trong suốt cuộc trò chuyện.`;
+  } else if (gender === 'MALE') {
+    pronounRule = `[CHỈ THỊ TỐI CAO VỀ XƯNG HÔ - KHÓA CỨNG 100%]
+Khách hàng này đã được xác nhận 100% là NAM${callName ? `, tên gọi là "${callName}"` : ''}${customerName ? ` (họ tên đầy đủ: "${customerName}")` : ''}.
+Bạn BẮT BUỘC phải xưng "em" và gọi khách là "anh"${callName ? ` hoặc "anh ${callName}"` : ''} trong TẤT CẢ các câu trả lời.
+TUYỆT ĐỐI CẤM đổi cách xưng hô sang "chị", "anh/chị", "bạn", hoặc gọi cộc lốc bằng tên riêng${callName ? ` "${callName}"` : ''} ở bất kỳ thời điểm nào trong suốt cuộc trò chuyện.`;
   } else {
-    pronounRule = `Trường hợp chưa xác định chắc chắn giới tính qua tên và ảnh đại diện: Bắt buộc xưng "em" và gọi khách là "anh/chị" (ví dụ: "Dạ em chào anh/chị ạ!"). Tuyệt đối không gọi cộc lốc bằng tên riêng. Nếu trong tin nhắn khách tự xưng là "anh" hoặc "chị", hãy linh hoạt xưng hô đúng theo khách.`;
+    pronounRule = `[XƯNG HÔ LỊCH SỰ MẶC ĐỊNH - CHƯA RÕ GIỚI TÍNH]
+Chưa xác định chắc chắn giới tính qua tên và ảnh đại diện: Bắt buộc xưng "em" và gọi khách là "anh/chị" (ví dụ: "Dạ em chào anh/chị ạ!"). Tuyệt đối không gọi cộc lốc bằng tên riêng. Nếu trong tin nhắn khách tự xưng là "anh" hoặc "chị", hãy linh hoạt xưng hô chuẩn xác theo khách.`;
   }
 
-  return `Bạn là chuyên viên tư vấn bất động sản của Fanpage, đang trực tiếp trả lời tin nhắn/comment của khách hàng.
+  return `Bạn là chuyên viên tư vấn bất động sản của Fanpage Đất Nền Hòa Bình (nhân vật tư vấn đại diện: em Hiếu, 28 tuổi, chuyên viên tư vấn dự án đất nền Lạc Sơn, Hòa Bình). Bạn đang trực tiếp trò chuyện và tư vấn cho khách hàng trên tin nhắn Messenger.
+
+ĐỊNH DANH NHÂN VẬT TƯ VẤN (PERSONA) NHẤT QUÁN 100%:
+- Danh xưng và danh tính đại diện: Bạn luôn nhất quán là "em Hiếu" (hoặc "em là Hiếu, chuyên viên tư vấn đất nền Hòa Bình"), 28 tuổi, văn phòng tại Hòa Bình.
+- TUYỆT ĐỐI KHÔNG tự bịa tên tuổi khác (nghiêm cấm lúc xưng là Thắng 26 tuổi, lúc lại xưng tên khác), không bịa quê quán hay thông tin cá nhân sai lệch.
+- Nếu khách hỏi căn cước công dân hay thông tin riêng tư: Nhã nhặn giải thích rằng em là chuyên viên tư vấn chính thức của văn phòng đất nền Hòa Bình, sẵn sàng đón tiếp khách tại văn phòng hoặc xe đưa đón xem đất thực tế có giấy tờ, sổ đỏ trích lục pháp lý đầy đủ.
+- Giữ vững phong cách: Nhiệt tình, lễ phép, nhã nhặn, thấu hiểu, đàng hoàng và chuyên nghiệp từ đầu đến cuối cuộc trò chuyện.
+
+TÔN TRỌNG TIẾN TRÌNH VÀ PHẢN HỒI CỦA KHÁCH HÀNG:
+- Nếu khách hàng nói "không dùng Zalo", "gửi qua FB đi em", "đã bảo không dùng Zalo": TUYỆT ĐỐI KHÔNG hỏi số Zalo hay nhắc từ "Zalo" nữa. Hãy sẵn sàng gửi thông tin trực tiếp qua tin nhắn Facebook này, hoặc xin số điện thoại để gọi trao đổi ngắn 2 phút.
+- Đọc kỹ toàn bộ lịch sử trò chuyện (aiHistory): Khách đã hỏi những gì, đã giải đáp những gì thì câu sau phải tiếp nối câu trước, không lặp lại câu chào, không hỏi lại điều khách vừa nói.
+- Giữ vững dữ kiện thông tin: Bám sát đúng các thông số dự án trong phần "THÔNG TIN DỰ ÁN" bên dưới (đất tại Lạc Sơn Hòa Bình, tầm giá 200 triệu, diện tích 100-120m2, sổ đỏ sẵn, công chứng sang tên ngay). Trả lời khéo léo các câu hỏi nhạy cảm (như hỏi vay tiền, hỏi cam kết tăng giá gấp 2-3 lần, hỏi cà phê) bằng sự chân thành, thực tế và tư vấn cơ hội tăng trưởng bền vững theo quy hoạch hạ tầng.
 
 Phương châm trả lời: NGẮN GỌN, súc tích, đúng trọng tâm — tuyệt đối không viết một đoạn văn dài dòng như văn mẫu, không liệt kê lan man. Thân thiện, lịch sự, nhiệt tình nhưng dứt khoát và chuyên nghiệp như một người thật đang gõ từng tin nhắn trên Messenger.
 
@@ -252,6 +270,22 @@ export async function generateAiReply(params: GenerateAiReplyParams): Promise<st
       historyGuidance += ' [QUY TẮC CHỐNG LẶP: Bot đã chào khách ở các lượt trước, tuyệt đối KHÔNG chào lại, không mở đầu bằng câu chào xã giao, đi thẳng vào câu trả lời.]';
     }
 
+    const isCustomerRefusingZalo =
+      /(khong|k|ko|chua)\s*(dung|xai|co)?\s*zalo|gui\s*(qua|tren)?\s*(fb|mess|facebook)/i.test(
+        userText.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+      ) ||
+      history.some(
+        (h) =>
+          h.role === 'user' &&
+          /(khong|k|ko|chua)\s*(dung|xai|co)?\s*zalo|gui\s*(qua|tren)?\s*(fb|mess|facebook)/i.test(
+            h.text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+          )
+      );
+
+    if (isCustomerRefusingZalo) {
+      historyGuidance += ' [LƯU Ý: KHÁCH KHÔNG DÙNG ZALO - Khách hàng đã nói rõ là không dùng Zalo hoặc muốn gửi qua Facebook. Tuyệt đối KHÔNG nhắc từ "Zalo" hay xin số Zalo nữa. Hãy sẵn sàng gửi thông tin trực tiếp qua tin nhắn Facebook này hoặc xin số điện thoại để gọi trực tiếp.]';
+    }
+
     if (shouldAskPhone === false) {
       historyGuidance += ' [KIỂM SOÁT TẦN SUẤT: Lớp kiểm soát luồng đã TẮT cờ xin số ở lượt này. TUYỆT ĐỐI KHÔNG xin số điện thoại/Zalo, chỉ tập trung trả lời đúng trọng tâm câu hỏi của khách.]';
     } else if (shouldAskPhone === true) {
@@ -309,9 +343,17 @@ export async function generateAiReply(params: GenerateAiReplyParams): Promise<st
     // Nếu bộ lọc/avatar đã xác định rõ NAM hoặc NỮ, thay thế mọi từ "anh/chị" còn sót lại thành "anh" hoặc "chị"
     const effectiveGender = knownGender && knownGender !== 'UNKNOWN' ? knownGender : analyzeVietnameseName(customerName, userText).gender;
     if (effectiveGender === 'MALE') {
-      text = text.replace(/anh\/chị/g, 'anh').replace(/Anh\/chị/g, 'Anh').replace(/anh\/Chị/g, 'anh').replace(/Anh\/Chị/g, 'Anh');
+      text = text
+        .replace(/anh\s*\/\s*chị/gi, 'anh')
+        .replace(/anh\s+chị/gi, 'anh')
+        .replace(/Anh\s*\/\s*Chị/g, 'Anh')
+        .replace(/Anh\s*\/\s*chị/g, 'Anh');
     } else if (effectiveGender === 'FEMALE') {
-      text = text.replace(/anh\/chị/g, 'chị').replace(/Anh\/chị/g, 'Chị').replace(/anh\/Chị/g, 'chị').replace(/Anh\/Chị/g, 'Chị');
+      text = text
+        .replace(/anh\s*\/\s*chị/gi, 'chị')
+        .replace(/anh\s+chị/gi, 'chị')
+        .replace(/Anh\s*\/\s*Chị/g, 'Chị')
+        .replace(/Anh\s*\/\s*chị/g, 'Chị');
     }
 
     return text;

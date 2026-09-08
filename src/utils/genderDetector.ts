@@ -129,7 +129,11 @@ export const FEMALE_COMPOUND_NAMES = new Set([
   // Tổ hợp với Phương (Nữ)
   'mai phuong', 'thu phuong', 'bich phuong', 'lan phuong', 'ngoc phuong', 'thao phuong', 'anh phuong',
   // Tổ hợp với Ngọc (Nữ)
-  'nhu ngoc', 'bich ngoc', 'kim ngoc', 'mai ngoc', 'lan ngoc', 'anh ngoc', 'hong ngoc'
+  'nhu ngoc', 'bich ngoc', 'kim ngoc', 'mai ngoc', 'lan ngoc', 'anh ngoc', 'hong ngoc',
+  // Tổ hợp với Thanh đứng trước (Nữ)
+  'thanh trang', 'thanh thao', 'thanh huong', 'thanh hang', 'thanh mai', 'thanh hoa',
+  'thanh nga', 'thanh tuyet', 'thanh van', 'thanh huyen', 'thanh tam', 'thanh truc',
+  'thanh thuy', 'thanh xuan'
 ]);
 
 /**
@@ -240,15 +244,21 @@ export function analyzeVietnameseName(
   // Mặc định tên gọi (callName) là từ cuối cùng trong chuỗi họ tên
   let callName = rawTokens[rawTokens.length - 1];
 
-  // Phát hiện tên bị đảo ngược (First name đứng trước Họ, ví dụ: "Bay Nguyen", "Lan Nguyen")
-  // Nếu chỉ có 2 từ, từ thứ 2 là họ phổ biến (Nguyen, Tran, Le...) và từ thứ nhất KHÔNG phải họ,
-  // thì từ đầu tiên chính là tên gọi.
-  const isReversedOrder =
+  // Phát hiện tên bị đảo ngược (First name đứng trước Họ, ví dụ: "Bay Nguyen", "Lan Nguyen", "Trang Thanh Bui")
+  let isReversedOrder = false;
+  if (
     rawTokens.length === 2 &&
     COMMON_SURNAMES.has(normTokens[1]) &&
-    !COMMON_SURNAMES.has(normTokens[0]);
-
-  if (isReversedOrder) {
+    !COMMON_SURNAMES.has(normTokens[0])
+  ) {
+    isReversedOrder = true;
+    callName = rawTokens[0];
+  } else if (
+    rawTokens.length >= 3 &&
+    COMMON_SURNAMES.has(normTokens[normTokens.length - 1]) &&
+    !COMMON_SURNAMES.has(normTokens[0])
+  ) {
+    isReversedOrder = true;
     callName = rawTokens[0];
   }
 

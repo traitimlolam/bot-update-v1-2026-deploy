@@ -3,7 +3,7 @@
  * việc lắp ráp system prompt: luôn nhúng đúng knowledgeBase.ts, không nhận/không rò rỉ số điện
  * thoại khách vào prompt (hàm không có tham số nào cho phép truyền số điện thoại).
  */
-import { buildSystemInstruction, describeIntent } from '../src/ai/geminiService';
+import { buildSystemInstruction, describeIntent, generateAiReply } from '../src/ai/geminiService';
 import { AREA_KNOWLEDGE_BASE } from '../src/config/knowledgeBase';
 
 describe('geminiService.buildSystemInstruction (mục 4.2)', () => {
@@ -149,6 +149,96 @@ describe('geminiService.describeIntent (mục 4.2)', () => {
       const instruction = describeIntent({ kind: "AI_FREE_TEXT" }, "thu tuc phap ly the nao", false, true, 3);
       expect(instruction).toContain("CỜ XIN SỐ: BẬT - MỐC 3");
       expect(instruction).toContain("thủ tục pháp lý");
+    });
+  });
+
+  describe("Tính nhất quán cuộc trò chuyện & Khóa đại từ ca Bùi Thanh Trang (Chỉ thị 08/09/2026)", () => {
+    it("buildSystemInstruction cho Bùi Thanh Trang khóa cứng 100% NỮ (chị / chị Trang)", () => {
+      const sysInstruction = buildSystemInstruction("Bùi Thanh Trang", "FEMALE");
+      expect(sysInstruction).toContain("[CHỈ THỊ TỐI CAO VỀ XƯNG HÔ - KHÓA CỨNG 100%]");
+      expect(sysInstruction).toContain("Khách hàng này đã được xác nhận 100% là NỮ");
+      expect(sysInstruction).toContain('gọi khách là "chị" hoặc "chị Trang" trong TẤT CẢ các câu trả lời');
+      expect(sysInstruction).toContain('TUYỆT ĐỐI CẤM đổi cách xưng hô sang "anh", "anh/chị"');
+      expect(sysInstruction).toContain("nhân vật tư vấn đại diện: em Hiếu, 28 tuổi");
+    });
+
+    it("chuỗi 5 tin nhắn liên tiếp mô phỏng ca Bùi Thanh Trang: đại từ xưng hô luôn nhất quán là chị/chị Trang", async () => {
+      const turns = [
+        { text: "mình xin thông tin đất 200te", isNew: true },
+        { text: "gửi qua FB đi em, chị k dùng zalo", isNew: false },
+        { text: "chị muốn đất mà dễ tăng giá ấy. chỗ nào tăng giá gấp đôi trong năm nay hả em", isNew: false },
+        { text: "thế em tên gì? bao nhiêu tuổi", isNew: false },
+        { text: "mai đi cà phê để em giới thiệu đất thì e trả tiền hay chị trả?", isNew: false },
+      ];
+
+      const history: Array<{ role: "user" | "model"; text: string }> = [];
+
+      for (const turn of turns) {
+        const mockResponse = {
+          choices: [
+            {
+              message: {
+                content: "Dạ em chào anh/chị, em gửi thông tin cho anh/chị tham khảo ạ.",
+              },
+            },
+          ],
+        };
+
+        const originalFetch = global.fetch;
+        global.fetch = jest.fn().mockResolvedValue({
+          ok: true,
+          json: async () => mockResponse,
+        });
+
+        const reply = await generateAiReply({
+          intent: { kind: "AI_FREE_TEXT" },
+          userText: turn.text,
+          history,
+          customerName: "Bùi Thanh Trang",
+          isNewCustomer: turn.isNew,
+          knownGender: "FEMALE",
+          shouldAskPhone: false,
+        });
+
+        expect(reply).not.toMatch(new RegExp('anh/chị', 'i'));
+        expect(reply).not.toMatch(/anh chị/i);
+        expect(reply).toMatch(/chị/i);
+
+        history.push({ role: "user", text: turn.text });
+        history.push({ role: "model", text: reply });
+
+        global.fetch = originalFetch;
+      }
+    });
+
+    it("phát hiện khách từ chối Zalo -> bổ sung chỉ dẫn cấm xin Zalo trong prompt gửi AI", async () => {
+      let sentMessages: any[] = [];
+      const originalFetch = global.fetch;
+      global.fetch = jest.fn().mockImplementation((_url, options) => {
+        const body = JSON.parse(options.body);
+        sentMessages = body.messages;
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: "Dạ vâng chị, em tư vấn trực tiếp qua Facebook cho chị nhé." } }],
+          }),
+        });
+      });
+
+      await generateAiReply({
+        intent: { kind: "AI_FREE_TEXT" },
+        userText: "gửi qua FB đi em, chị k dùng zalo",
+        history: [],
+        customerName: "Bùi Thanh Trang",
+        isNewCustomer: false,
+        knownGender: "FEMALE",
+      });
+
+      const userContent = sentMessages[sentMessages.length - 1]?.content || "";
+      expect(userContent).toContain("KHÁCH KHÔNG DÙNG ZALO");
+      expect(userContent).toContain('Tuyệt đối KHÔNG nhắc từ "Zalo" hay xin số Zalo');
+
+      global.fetch = originalFetch;
     });
   });
 

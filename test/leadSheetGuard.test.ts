@@ -521,4 +521,28 @@ describe('runFlowTurn: appendLead chỉ được gọi khi số điện thoại 
       expect(mockedTouchFollowUpTracked).toHaveBeenCalledWith('RESOLVED_PSID');
     });
   });
+
+  describe('Khóa cứng giới tính & tên khách (Lock on First Detection - Ca Bùi Thanh Trang)', () => {
+    it('khi session đã lưu customerName Bùi Thanh Trang và gender FEMALE -> runFlowTurn khóa cứng FEMALE và không bị ghi đè', async () => {
+      mockedGetConversation.mockResolvedValue({
+        state: 'IN_PROGRESS',
+        customerName: 'Bùi Thanh Trang',
+        gender: 'FEMALE',
+        customerMessageCount: 2,
+      });
+
+      await runFlowTurn('PSID_TRANG', { type: 'TEXT', text: 'em bao tuoi roi' });
+
+      expect(mockedGenerateAiReply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          customerName: 'Bùi Thanh Trang',
+          knownGender: 'FEMALE',
+        })
+      );
+
+      const savedRecord = mockedSaveConversation.mock.calls[0][1];
+      expect(savedRecord.customerName).toBe('Bùi Thanh Trang');
+      expect(savedRecord.gender).toBe('FEMALE');
+    });
+  });
 });

@@ -392,4 +392,28 @@ describe('genderDetector', () => {
       expect(formatPersonalizedMessage(template, 'Bình', null, 'FEMALE')).toBe('Em chào chị.');
     });
   });
+
+  describe('Ca kiểm thử Bùi Thanh Trang & tên có từ đệm trung tính (Chỉ thị 08/09/2026)', () => {
+    it('nhận diện chính xác Bùi Thanh Trang là FEMALE và callName là Trang ngay từ lượt đầu', () => {
+      const result = analyzeVietnameseName('Bùi Thanh Trang');
+      expect(result.gender).toBe('FEMALE');
+      expect(result.callName).toBe('Trang');
+    });
+
+    it('nhận diện chính xác tên đệm trung tính + tên chính thuần nữ', () => {
+      expect(analyzeVietnameseName('Thanh Trang').gender).toBe('FEMALE');
+      expect(analyzeVietnameseName('Nguyễn Thanh Thảo').gender).toBe('FEMALE');
+      expect(analyzeVietnameseName('Trần Thanh Hương').gender).toBe('FEMALE');
+    });
+
+    it('nhận diện tên đảo ngược tiếng Anh có họ ở cuối: Trang Thanh Bui, Trang Bui', () => {
+      const r1 = analyzeVietnameseName('Trang Thanh Bui');
+      expect(r1.gender).toBe('FEMALE');
+      expect(r1.callName).toBe('Trang');
+
+      const r2 = analyzeVietnameseName('Trang Bui');
+      expect(r2.gender).toBe('FEMALE');
+      expect(r2.callName).toBe('Trang');
+    });
+  });
 });

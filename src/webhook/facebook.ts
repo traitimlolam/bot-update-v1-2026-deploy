@@ -489,39 +489,55 @@ export async function runFlowTurn(
     // cho `services/reminderService.ts` fallback đúng kiểu recipient khi gửi tin nhắc 20h (mục 5.4).
     const commentId = overrideRecipient && 'comment_id' in overrideRecipient ? overrideRecipient.comment_id : null;
 
-    // Lấy tên và giới tính khách để xưng hô chuẩn xác: ưu tiên từ session, nếu chưa có thì fetch & phân tích
+    // Lấy tên và giới tính khách để xưng hô chuẩn xác:
+    // KHÓA CỨNG GIỚI TÍNH (Lock on First Detection):
+    // Đọc thẳng giá trị đã lưu trong Firestore. Nếu đã có customerName và gender !== 'UNKNOWN',
+    // TUYỆT ĐỐI KHÔNG phân tích lại, không để nội dung tin nhắn mới làm thay đổi.
     let customerName = current.customerName ?? null;
     let gender = current.gender ?? null;
     let avatarUrl = current.avatarUrl ?? null;
 
     const userText = input.type === 'TEXT' ? input.text : input.type === 'FEED_COMMENT' ? input.text ?? '' : '';
 
-    if (!customerName || !gender) {
+    if (!customerName || !gender || gender === 'UNKNOWN') {
       if (process.env.NODE_ENV === 'test') {
         if (!customerName && _getCustomerName) customerName = await _getCustomerName();
-        if (!gender) {
+        if (!gender || gender === 'UNKNOWN') {
           const nameAnalysis = analyzeVietnameseName(customerName, userText);
           gender = nameAnalysis.gender;
         }
       } else {
         try {
-          const profile = await fetchCustomerProfile(psid);
-          if (!customerName) customerName = profile.name;
-          if (!avatarUrl) avatarUrl = profile.profilePicUrl;
-          if (!gender) {
-            const genderResult = await determineCustomerGender({
-              customerName,
-              avatarUrl: profile.profilePicUrl,
-              contextText: userText,
-              isSilhouette: profile.isSilhouette,
-            });
+          let profile = await fetchCustomerProfile(psid);
+          // Cơ chế thử lại nhanh 1 lần nếu ở tin đầu Graph API trả về rỗng do chưa kịp đồng bộ chỉ mục
+          if (!profile.name) {
+            await delay(250);
+            profile = await fetchCustomerProfile(psid);
+          }
+          if (profile.name) customerName = profile.name;
+          if (profile.profilePicUrl) avatarUrl = profile.profilePicUrl;
+
+          const genderResult = await determineCustomerGender({
+            customerName,
+            avatarUrl: avatarUrl || profile.profilePicUrl,
+            contextText: userText,
+            isSilhouette: profile.isSilhouette,
+          });
+          if (genderResult.gender !== 'UNKNOWN') {
             gender = genderResult.gender;
+          } else if (!gender) {
+            gender = 'UNKNOWN';
           }
         } catch (err) {
           await logError('determineCustomerGender', err, { psid });
           if (!gender) gender = 'UNKNOWN';
         }
       }
+
+      // Khóa cứng ngay vào đối tượng current để sử dụng xuyên suốt phiên này
+      if (customerName) current.customerName = customerName;
+      if (gender && gender !== 'UNKNOWN') current.gender = gender;
+      if (avatarUrl) current.avatarUrl = avatarUrl;
     }
 
     const phoneCadence = getPhoneCadence(customerMessageCount, userText);
@@ -557,14 +573,22 @@ export async function runFlowTurn(
           // Bong bóng 2: Trả lời ngắn gọn, đúng trọng tâm câu hỏi của khách (giá, diện tích, sổ đỏ, vị trí)
           // Bong bóng 3: BẮT BUỘC câu xin số Zalo kèm lợi ích gửi tài liệu (sơ đồ phân lô, bảng giá)
           if (isFirstQuestion) {
-            const bubble1 = formatPersonalizedMessage('Dạ em chào anh/chị ạ!', customerName, userText, gender);
+            const { callName } = analyzeVietnameseName(customerName);
+            const greetingTemplate = gender === 'FEMALE'
+              ? (callName ? `Dạ em chào chị ${callName} ạ!` : 'Dạ em chào chị ạ!')
+              : gender === 'MALE'
+              ? (callName ? `Dạ em chào anh ${callName} ạ!` : 'Dạ em chào anh ạ!')
+              : 'Dạ em chào anh/chị ạ!';
+            const bubble1 = greetingTemplate;
             const bubble2 = cleanAnswerBubble(text);
-            const bubble3 = formatPersonalizedMessage(
-              'Em có sẵn sơ đồ phân lô và bảng giá chi tiết từng vị trí, anh/chị cho em xin số Zalo để em gửi qua cho mình tiện xem nhé!',
-              customerName,
-              userText,
-              gender
+
+            const isNoZalo = /(khong|k|ko|chua)\s*(dung|xai|co)?\s*zalo|gui\s*(qua|tren)?\s*(fb|mess|facebook)/i.test(
+              userText.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
             );
+            const defaultBubble3 = isNoZalo
+              ? 'Em có sẵn sơ đồ phân lô và bảng giá chi tiết từng vị trí, em gửi qua tin nhắn Facebook này cho mình xem luôn nhé!'
+              : 'Em có sẵn sơ đồ phân lô và bảng giá chi tiết từng vị trí, anh/chị cho em xin số Zalo để em gửi qua cho mình tiện xem nhé!';
+            const bubble3 = formatPersonalizedMessage(defaultBubble3, customerName, userText, gender);
             return [bubble1, bubble2, bubble3].filter(Boolean);
           }
 
@@ -862,25 +886,32 @@ async function handleFirstOpen(psid: string): Promise<void> {
       let gender = current?.gender ?? null;
       let avatarUrl = current?.avatarUrl ?? null;
 
-      if (!customerName || !gender) {
+      if (!customerName || !gender || gender === 'UNKNOWN') {
         if (process.env.NODE_ENV === 'test') {
           const nameAnalysis = analyzeVietnameseName(customerName, '');
           gender = nameAnalysis.gender;
         } else {
           try {
-            const profile = await fetchCustomerProfile(psid);
-            if (!customerName) customerName = profile.name;
-            if (!avatarUrl) avatarUrl = profile.profilePicUrl;
+            let profile = await fetchCustomerProfile(psid);
+            if (!profile.name) {
+              await delay(250);
+              profile = await fetchCustomerProfile(psid);
+            }
+            if (profile.name) customerName = profile.name;
+            if (profile.profilePicUrl) avatarUrl = profile.profilePicUrl;
             const genderResult = await determineCustomerGender({
               customerName,
-              avatarUrl: profile.profilePicUrl,
+              avatarUrl: avatarUrl || profile.profilePicUrl,
               isSilhouette: profile.isSilhouette,
             });
-            gender = genderResult.gender;
+            if (genderResult.gender !== 'UNKNOWN') {
+              gender = genderResult.gender;
+            } else if (!gender) {
+              gender = 'UNKNOWN';
+            }
           } catch (err) {
-            // An toàn rơi về Tầng 3 (UNKNOWN) — không được để lỗi ở đây chặn việc gửi tin chào mở màn.
             await logError('determineCustomerGender', err, { psid });
-            gender = 'UNKNOWN';
+            if (!gender) gender = 'UNKNOWN';
           }
         }
       }
