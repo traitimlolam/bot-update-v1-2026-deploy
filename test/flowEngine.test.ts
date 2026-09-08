@@ -255,4 +255,26 @@ describe('flowEngine.processInput', () => {
     });
   });
 
+
+  describe('Khống chế số intent trong messagesToSend (Chống nhồi nhét nhiều kịch bản cùng lúc)', () => {
+    it('mọi nhánh trong processInput luôn trả về chính xác 1 intent duy nhất', () => {
+      const rec = newConversation();
+      
+      const resText = processInput(rec, { type: 'TEXT', text: 'cho anh hỏi đất' });
+      expect(resText.messagesToSend).toHaveLength(1);
+
+      const resBtn = processInput(rec, { type: 'BUTTON', payload: 'BTN_PRICE' });
+      expect(resBtn.messagesToSend).toHaveLength(1);
+
+      const resPhone = processInput(rec, { type: 'TEXT', text: '0912345678' });
+      expect(resPhone.messagesToSend).toHaveLength(1);
+
+      const resInvalidPhone = processInput(rec, { type: 'TEXT', text: '0912345' });
+      expect(resInvalidPhone.messagesToSend).toHaveLength(1);
+
+      const closedRec: ConversationRecord = { ...rec, state: 'CLOSED', phone: '0912345678' };
+      const resClosed = processInput(closedRec, { type: 'TEXT', text: 'alo bạn' });
+      expect(resClosed.messagesToSend).toHaveLength(1);
+    });
+  });
 });

@@ -37,6 +37,60 @@ import { withRetry } from '../util/retry';
 
 const GRAPH_API_VERSION = 'v19.0';
 const GRAPH_BASE_URL = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
+// ---------------------------------------------------------------------------
+// Chống trùng lặp Webhook & Debounce theo PSID (Idempotency & Burst Protection)
+// ---------------------------------------------------------------------------
+
+const processedMids = new Map<string, number>();
+const lastProcessedAtByPsid = new Map<string, number>();
+
+/**
+ * Kiểm tra xem message_id (mid) đã từng được tiếp nhận chưa (chống Meta retry do timeout).
+ * Tự động xoá cache các mid cũ hơn 10 phút.
+ */
+export function isDuplicateMid(mid?: string): boolean {
+  if (!mid) return false;
+  const now = Date.now();
+  if (processedMids.size > 5000) {
+    for (const [key, time] of processedMids.entries()) {
+      if (now - time > 10 * 60 * 1000) processedMids.delete(key);
+    }
+  }
+  if (processedMids.has(mid)) {
+    return true;
+  }
+  processedMids.set(mid, now);
+  return false;
+}
+
+/**
+ * Kiểm tra debounce theo PSID (chống Meta bắn đồng thời 2-3 webhook khi bấm quảng cáo).
+ * Nếu cùng một PSID gửi nhiều sự kiện trong vòng debounceMs (mặc định 3000ms), lập tức bỏ qua.
+ */
+export function isPsidDebounced(psid: string, debounceMs: number = 3000): boolean {
+  if (!psid) return false;
+  const now = Date.now();
+  if (lastProcessedAtByPsid.size > 5000) {
+    for (const [key, time] of lastProcessedAtByPsid.entries()) {
+      if (now - time > 10 * 60 * 1000) lastProcessedAtByPsid.delete(key);
+    }
+  }
+  const lastTime = lastProcessedAtByPsid.get(psid);
+  if (lastTime && now - lastTime < debounceMs) {
+    return true;
+  }
+  lastProcessedAtByPsid.set(psid, now);
+  return false;
+}
+
+/**
+ * Reset cache deduplication và debounce phục vụ unit tests.
+ */
+export function resetWebhookDeduplicationForTest(): void {
+  processedMids.clear();
+  lastProcessedAtByPsid.clear();
+}
+
 /**
  * Thời gian chờ ngẫu nhiên giữa 2 tin nhắn/bong bóng (2 đến 3 giây) để giống người nhắn thật.
  * Trong môi trường test: 0ms để test chạy tức thì.
@@ -262,6 +316,8 @@ export function splitMessageIntoBubbles(text: string): string[] {
   return [first, middle, last].filter(Boolean);
 }
 
+export const MAX_BUBBLES_PER_TURN = 3;
+
 async function sendMessageSequence(
   recipient: Recipient,
   items: OutgoingMessage[],
@@ -270,27 +326,34 @@ async function sendMessageSequence(
 ): Promise<string | undefined> {
   let resolvedPsid: string | undefined;
   let currentRecipient = recipient;
+  let totalSentBubbles = 0;
 
   for (let i = 0; i < items.length; i++) {
+    if (totalSentBubbles >= MAX_BUBBLES_PER_TURN) break;
+
     const item = items[i];
     const text = await resolveIntentTextFn(item);
     const bubbles = splitMessageIntoBubbles(text);
 
     for (let b = 0; b < bubbles.length; b++) {
+      if (totalSentBubbles >= MAX_BUBBLES_PER_TURN) break;
+
       await sendTypingOn(currentRecipient);
       const recipientId = await sendText(currentRecipient, bubbles[b]);
+      totalSentBubbles++;
+
       if (recipientId && !resolvedPsid) {
         resolvedPsid = recipientId;
         if (!keepOriginalRecipient) {
           currentRecipient = { id: recipientId };
         }
       }
-      if (b < bubbles.length - 1) {
+      if (b < bubbles.length - 1 && totalSentBubbles < MAX_BUBBLES_PER_TURN) {
         await delay(getRandomMessageDelayMs());
       }
     }
 
-    if (i < items.length - 1) {
+    if (i < items.length - 1 && totalSentBubbles < MAX_BUBBLES_PER_TURN) {
       await delay(getRandomMessageDelayMs());
     }
   }
@@ -387,29 +450,17 @@ export async function runFlowTurn(
         const targetRecipient: Recipient = overrideRecipient ?? { id: psid };
         const keepOriginal = commentId !== null;
 
-        // Khách mới (chưa từng nhận tin nào) nhắn tự do thẳng vào nội dung câu hỏi (không qua nút
-        // bấm) -> tách lời chào ra thành 1 tin `AI_GREETING` riêng gửi TRƯỚC, rồi mới tới tin trả lời
-        // đúng trọng tâm câu hỏi + mời số Zalo — thay vì dồn chào + trả lời vào chung 1 tin dài như
-        // trước (phản hồi thực tế: "ngữ cảnh dài quá"). `AI_TOPIC` không cần tách vì luôn xảy ra SAU
-        // khi khách đã nhận tin chào mở màn kèm 3 nút (mục 5.1) nên không bao giờ là lượt đầu chưa
-        // được chào.
-        const shouldSplitGreeting =
-          isNewCustomer && result.messagesToSend.length === 1 && result.messagesToSend[0].kind === 'AI_FREE_TEXT';
-        const itemsToSend: OutgoingMessage[] = shouldSplitGreeting
-          ? [{ kind: 'AI_GREETING' }, result.messagesToSend[0]]
-          : result.messagesToSend;
+        // Khống chế cứng: Mỗi lượt chat CHỈ gửi đúng 1 intent của AI (không tách lời chào thành intent riêng)
+        const itemsToSend: OutgoingMessage[] = result.messagesToSend.slice(0, 1);
 
         let updatedAiHistory: AiHistoryEntry[] | undefined;
         const intentResolver = async (intent: ReplyIntent) => {
-          // Đã tách chào thành tin riêng ở trên -> tin nội dung còn lại không cần AI tự chào lại nữa.
-          const effectiveIsNewCustomer = shouldSplitGreeting ? false : isNewCustomer;
-
           const { text, updatedHistory } = await resolveIntentText(
             intent,
             userText,
             current.aiHistory ?? [],
             customerName,
-            effectiveIsNewCustomer,
+            isNewCustomer,
             gender,
             phoneCadence.askPhone,
             phoneCadence.milestone
@@ -638,8 +689,24 @@ async function fetchCustomerName(psid: string): Promise<string | null> {
 }
 
 async function handleMessagingEvent(event: MessagingEvent): Promise<void> {
-  const psid = event.sender.id;
+  const psid = event.sender?.id;
   const text = event.message?.text;
+  const mid = event.message?.mid;
+
+  if (!psid) return;
+
+  // 1. Chống trùng lặp message_id (Facebook retry do timeout hoặc burst webhook)
+  if (mid && isDuplicateMid(mid)) {
+    console.log(`[handleMessagingEvent] Bỏ qua webhook trùng lặp mid=${mid} từ PSID ${psid}`);
+    return;
+  }
+
+  // 2. Chống dồn dập nhiều webhook cùng lúc từ cùng 1 PSID (Debounce 3 giây khi bấm quảng cáo)
+  if (isPsidDebounced(psid, 3000)) {
+    console.log(`[handleMessagingEvent] Bỏ qua webhook dồn dập (debounce 3s) từ PSID ${psid}`);
+    return;
+  }
+
   console.log(`[handleMessagingEvent] Nhận tin nhắn từ PSID ${psid}: "${text ?? ''}"`);
 
   // Kiểm tra Human Takeover (nhường người thật chat trong vòng 10 phút)
@@ -671,53 +738,55 @@ async function handleMessagingEvent(event: MessagingEvent): Promise<void> {
  * menu 3 nút dù Facebook có gửi lại postback GET_STARTED (bot đã bàn giao — mục 6, AC6).
  */
 async function handleFirstOpen(psid: string): Promise<void> {
-  try {
-    const current = await getConversation(psid);
-    if (current && current.state === 'CLOSED') {
-      return;
-    }
-    await sendTypingOn({ id: psid });
+  await withLock(`psid:${psid}`, async () => {
+    try {
+      const current = await getConversation(psid);
+      if (current && current.state === 'CLOSED') {
+        return;
+      }
+      await sendTypingOn({ id: psid });
 
-    let customerName = current?.customerName ?? null;
-    let gender = current?.gender ?? null;
-    let avatarUrl = current?.avatarUrl ?? null;
+      let customerName = current?.customerName ?? null;
+      let gender = current?.gender ?? null;
+      let avatarUrl = current?.avatarUrl ?? null;
 
-    if (!customerName || !gender) {
-      if (process.env.NODE_ENV === 'test') {
-        const nameAnalysis = analyzeVietnameseName(customerName, '');
-        gender = nameAnalysis.gender;
-      } else {
-        try {
-          const profile = await fetchCustomerProfile(psid);
-          if (!customerName) customerName = profile.name;
-          if (!avatarUrl) avatarUrl = profile.profilePicUrl;
-          const genderResult = await determineCustomerGender({
-            customerName,
-            avatarUrl: profile.profilePicUrl,
-            isSilhouette: profile.isSilhouette,
-          });
-          gender = genderResult.gender;
-        } catch (err) {
-          // An toàn rơi về Tầng 3 (UNKNOWN) — không được để lỗi ở đây chặn việc gửi tin chào mở màn.
-          await logError('determineCustomerGender', err, { psid });
-          gender = 'UNKNOWN';
+      if (!customerName || !gender) {
+        if (process.env.NODE_ENV === 'test') {
+          const nameAnalysis = analyzeVietnameseName(customerName, '');
+          gender = nameAnalysis.gender;
+        } else {
+          try {
+            const profile = await fetchCustomerProfile(psid);
+            if (!customerName) customerName = profile.name;
+            if (!avatarUrl) avatarUrl = profile.profilePicUrl;
+            const genderResult = await determineCustomerGender({
+              customerName,
+              avatarUrl: profile.profilePicUrl,
+              isSilhouette: profile.isSilhouette,
+            });
+            gender = genderResult.gender;
+          } catch (err) {
+            // An toàn rơi về Tầng 3 (UNKNOWN) — không được để lỗi ở đây chặn việc gửi tin chào mở màn.
+            await logError('determineCustomerGender', err, { psid });
+            gender = 'UNKNOWN';
+          }
         }
       }
-    }
 
-    const { text } = await resolveIntentText({ kind: 'AI_GREETING' }, '', [], customerName, false, gender);
-    await sendQuickReplyButtons(psid, text);
-    await saveConversation(psid, {
-      state: current?.state ?? 'NEW',
-      phone: current?.phone ?? null,
-      assignedStaff: current?.assignedStaff ?? null,
-      customerName: customerName ?? null,
-      gender: gender ?? null,
-      avatarUrl: avatarUrl ?? null,
-    });
-  } catch (err) {
-    await logError('handleFirstOpen', err, { psid });
-  }
+      const { text } = await resolveIntentText({ kind: 'AI_GREETING' }, '', [], customerName, false, gender);
+      await sendQuickReplyButtons(psid, text);
+      await saveConversation(psid, {
+        state: current?.state ?? 'NEW',
+        phone: current?.phone ?? null,
+        assignedStaff: current?.assignedStaff ?? null,
+        customerName: customerName ?? null,
+        gender: gender ?? null,
+        avatarUrl: avatarUrl ?? null,
+      });
+    } catch (err) {
+      await logError('handleFirstOpen', err, { psid });
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------

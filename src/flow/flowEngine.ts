@@ -224,7 +224,7 @@ export function processInput(current: ConversationRecord, input: FlowInput): Flo
   // lời mời để lại số Zalo do chính AI viết (không còn M3 cố định) — áp dụng như nhau dù đây là lần
   // đầu (NEW) hay nhắn thêm/hỏi lại (IN_PROGRESS), vì không còn tin chào M1 cố định để phân biệt 2
   // trường hợp này nữa.
-  return {
+  const result: FlowResult = {
     record: {
       ...current,
       state: 'IN_PROGRESS',
@@ -235,4 +235,11 @@ export function processInput(current: ConversationRecord, input: FlowInput): Flo
     correctedPhone: null,
     trackFollowUp: false,
   };
+
+  // Khống chế cứng: Mỗi lượt chat chỉ được chứa tối đa 1 intent trả lời của AI
+  if (result.messagesToSend.length > 1) {
+    result.messagesToSend = [result.messagesToSend[0]];
+  }
+
+  return result;
 }

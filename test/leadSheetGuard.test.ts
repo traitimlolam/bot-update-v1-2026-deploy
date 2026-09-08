@@ -100,25 +100,18 @@ describe('runFlowTurn: appendLead chỉ được gọi khi số điện thoại 
     // timeout để tránh flaky khi máy chạy chậm, thay vì chỉ vừa đủ sát ngưỡng mặc định 5000ms.
   );
 
-  it('free text không có SĐT trên state NEW (khách nhắn thẳng câu hỏi, chưa từng nhận tin nào) -> tách thành 2 tin: AI_GREETING rồi AI_FREE_TEXT (cả 2 isNewCustomer=false), gửi đúng 2 tin, chỉ aiHistory của AI_FREE_TEXT được lưu', async () => {
+  it('free text không có SĐT trên state NEW (khách nhắn thẳng câu hỏi) -> chỉ gửi đúng 1 intent AI_FREE_TEXT (isNewCustomer=true, AI tự chào ở đầu câu), lưu aiHistory', async () => {
     mockedGetConversation.mockResolvedValue(null); // null -> newConversation() -> state NEW
-    mockedGenerateAiReply
-      .mockResolvedValueOnce('Dạ em chào anh ạ!')
-      .mockResolvedValueOnce('Đất bên em ở Lạc Sơn, Hoà Bình anh nhé. Anh để lại số Zalo em gửi thêm ạ!');
+    mockedGenerateAiReply.mockResolvedValueOnce('Dạ em chào anh! Đất bên em ở Lạc Sơn, Hoà Bình anh nhé. Anh để lại số Zalo em gửi thêm ạ!');
 
     await runFlowTurn('PSID_NEW_TEXT', { type: 'TEXT', text: 'dat o dau vay em' }, async () => 'Khách A');
 
-    expect(mockedGenerateAiReply).toHaveBeenCalledTimes(2);
-    expect(mockedGenerateAiReply).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({ intent: { kind: 'AI_GREETING' }, isNewCustomer: false })
-    );
-    expect(mockedGenerateAiReply).toHaveBeenNthCalledWith(
-      2,
+    expect(mockedGenerateAiReply).toHaveBeenCalledTimes(1);
+    expect(mockedGenerateAiReply).toHaveBeenCalledWith(
       expect.objectContaining({
         intent: { kind: 'AI_FREE_TEXT' },
         userText: 'dat o dau vay em',
-        isNewCustomer: false,
+        isNewCustomer: true,
       })
     );
 
@@ -132,11 +125,12 @@ describe('runFlowTurn: appendLead chỉ được gọi khi số điện thoại 
       })
       .filter((body) => body && typeof body.message?.text === 'string')
       .map((body) => body.message.text as string);
-    expect(sentTexts).toHaveLength(2);
+    expect(sentTexts.length).toBeGreaterThanOrEqual(1);
+    expect(sentTexts.length).toBeLessThanOrEqual(3);
 
     expect(mockedUpdateAiHistory).toHaveBeenCalledWith('PSID_NEW_TEXT', [
       { role: 'user', text: 'dat o dau vay em' },
-      { role: 'model', text: 'Đất bên em ở Lạc Sơn, Hoà Bình anh nhé. Anh để lại số Zalo em gửi thêm ạ!' },
+      { role: 'model', text: 'Dạ em chào anh! Đất bên em ở Lạc Sơn, Hoà Bình anh nhé. Anh để lại số Zalo em gửi thêm ạ!' },
     ]);
   });
 
