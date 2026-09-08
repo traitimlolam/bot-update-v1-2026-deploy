@@ -51,10 +51,8 @@ export function buildSystemInstruction(customerName: string | null, knownGender:
     pronounRule = `Bộ lọc giới tính xác định khách là NAM: Bắt buộc xưng "em", gọi khách là "anh"${callName ? ` hoặc "anh ${callName}"` : ''}. Tuyệt đối KHÔNG dùng "anh/chị".`;
   } else if (gender === 'FEMALE') {
     pronounRule = `Bộ lọc giới tính xác định khách là NỮ: Bắt buộc xưng "em", gọi khách là "chị"${callName ? ` hoặc "chị ${callName}"` : ''}. Tuyệt đối KHÔNG dùng "anh/chị".`;
-  } else if (callName) {
-    pronounRule = `Chưa xác định được khách là nam hay nữ — xưng "em", gọi thẳng tên khách là "${callName}" thay vì dùng "anh/chị". Nếu trong tin nhắn khách tự xưng là "anh" hoặc "chị", hãy linh hoạt xưng hô đúng theo khách.`;
   } else {
-    pronounRule = 'Chưa có tên khách hoặc chưa xác định được giới tính — xưng "em", gọi khách là "anh/chị". Nếu trong tin nhắn khách tự xưng là "anh" hoặc "chị", hãy linh hoạt xưng hô đúng theo khách.';
+    pronounRule = `Trường hợp chưa xác định chắc chắn giới tính qua tên và ảnh đại diện: Bắt buộc xưng "em" và gọi khách là "anh/chị" (ví dụ: "Dạ em chào anh/chị ạ!"). Tuyệt đối không gọi cộc lốc bằng tên riêng. Nếu trong tin nhắn khách tự xưng là "anh" hoặc "chị", hãy linh hoạt xưng hô đúng theo khách.`;
   }
 
   return `Bạn là chuyên viên tư vấn bất động sản của Fanpage, đang trực tiếp trả lời tin nhắn/comment của khách hàng.

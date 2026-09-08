@@ -215,17 +215,9 @@ export function formatPersonalizedMessage(
     pronounLower = 'chị';
     pronounCap = 'Chị';
     pronounTitle = 'Chị';
-  } else {
-    // UNKNOWN: Điền đầy đủ cả họ tên của khách vào nếu có tên
-    const fullName = customerName?.trim();
-    if (fullName) {
-      pronounLower = fullName;
-      pronounCap = fullName;
-      pronounTitle = fullName;
-    } else {
-      return template;
-    }
   }
+  // UNKNOWN: giữ nguyên đại từ lịch sự mặc định "anh/chị" đã set ở trên — tuyệt đối không tự ý
+  // đoán mò và gọi cộc lốc bằng tên riêng khi chưa chắc chắn giới tính.
 
   return template
     .replace(/Anh\/Chị/g, pronounTitle)
@@ -342,23 +334,22 @@ export async function determineCustomerGender(params: DetermineGenderParams): Pr
     return { gender: textGender, callName, source: 'TEXT' };
   }
 
-  // 2. Kiểm tra avatar nếu có ảnh thật (không phải silhouette mặc định)
-  let avatarGender: Gender = 'UNKNOWN';
-  if (avatarUrl && !isSilhouette) {
-    avatarGender = await detectGenderFromAvatar(avatarUrl);
-  }
-
-  // 3. Kết hợp kết quả từ Avatar và Tên:
-  // Nếu Avatar xác định được rõ ràng (MALE hoặc FEMALE)
-  if (avatarGender === 'MALE' || avatarGender === 'FEMALE') {
-    return { gender: avatarGender, callName, source: 'AVATAR' };
-  }
-
-  // 4. Nếu Avatar là UNKNOWN (ảnh cảnh, anime, đồ vật, hoặc không lấy được) -> Dựa vào bộ lọc Tên
+  // Tầng 1: bộ lọc tên xác định được rõ ràng -> dùng luôn, không cần gọi sang Tầng 2 (đỡ tốn 1 lượt
+  // gọi Gemini Vision khi tên đã đủ chắc chắn).
   if (nameAnalysis.gender !== 'UNKNOWN') {
     return { gender: nameAnalysis.gender, callName, source: 'NAME' };
   }
 
-  // 5. Cả 2 đều không xác định được -> UNKNOWN
+  // Tầng 2: tên trung tính/không xác định được -> thử nhận diện qua ảnh đại diện (nếu có ảnh thật,
+  // không phải silhouette mặc định).
+  let avatarGender: Gender = 'UNKNOWN';
+  if (avatarUrl && !isSilhouette) {
+    avatarGender = await detectGenderFromAvatar(avatarUrl);
+  }
+  if (avatarGender === 'MALE' || avatarGender === 'FEMALE') {
+    return { gender: avatarGender, callName, source: 'AVATAR' };
+  }
+
+  // Tầng 3: cả Tên lẫn Avatar đều không xác định được -> UNKNOWN (an toàn, giữ "anh/chị")
   return { gender: 'UNKNOWN', callName, source: 'DEFAULT' };
 }

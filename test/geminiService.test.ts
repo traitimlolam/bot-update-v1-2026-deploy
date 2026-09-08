@@ -32,9 +32,11 @@ describe('geminiService.buildSystemInstruction (mục 4.2)', () => {
     expect(instruction).toContain('gọi khách là "chị"');
   });
 
-  it('không xác định được giới tính nhưng có tên -> gọi thẳng tên, không dùng anh/chị', () => {
+  it('không xác định được giới tính dù có tên -> vẫn gọi "anh/chị", tuyệt đối không gọi cộc lốc bằng tên riêng', () => {
     const instruction = buildSystemInstruction('Bay Nguyen');
-    expect(instruction).toContain('gọi thẳng tên khách là "Bay"');
+    expect(instruction).toContain('gọi khách là "anh/chị"');
+    expect(instruction).not.toContain('gọi thẳng tên khách là "Bay"');
+    expect(instruction).toMatch(/không gọi cộc lốc bằng tên riêng/i);
   });
 
   it('không có tên khách -> gọi chung anh/chị', () => {

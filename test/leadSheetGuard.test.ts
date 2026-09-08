@@ -194,6 +194,7 @@ describe('runFlowTurn: appendLead chỉ được gọi khi số điện thoại 
       phone: '0912345678',
       customerName: 'Khách A',
       source: 'Tin nhắn',
+      psid: 'PSID_TEST',
     });
 
     const savedRecord = mockedSaveConversation.mock.calls[0][1] as ConversationRecord;
@@ -214,6 +215,7 @@ describe('runFlowTurn: appendLead chỉ được gọi khi số điện thoại 
       phone: '0912345678',
       customerName: 'Khách A',
       source: 'Cmt',
+      psid: 'PSID_TEST',
     });
   });
 

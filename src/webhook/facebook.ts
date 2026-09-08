@@ -323,16 +323,24 @@ export async function runFlowTurn(
         const nameAnalysis = analyzeVietnameseName(customerName, userText);
         gender = nameAnalysis.gender;
       } else {
-        const profile = await fetchCustomerProfile(psid);
-        if (!customerName) customerName = profile.name;
-        if (!avatarUrl) avatarUrl = profile.profilePicUrl;
-        const genderResult = await determineCustomerGender({
-          customerName,
-          avatarUrl: profile.profilePicUrl,
-          contextText: userText,
-          isSilhouette: profile.isSilhouette,
-        });
-        gender = genderResult.gender;
+        try {
+          // Tầng 1 (tên) đã UNKNOWN/không đủ tin cậy -> lấy avatar để phục vụ Tầng 2. Nếu bất kỳ
+          // bước nào ở đây lỗi, bắt lại tại đây và rơi về Tầng 3 (UNKNOWN, giữ "anh/chị") thay vì để
+          // lỗi thoát ra ngoài làm gián đoạn việc gửi trả lời cho khách.
+          const profile = await fetchCustomerProfile(psid);
+          if (!customerName) customerName = profile.name;
+          if (!avatarUrl) avatarUrl = profile.profilePicUrl;
+          const genderResult = await determineCustomerGender({
+            customerName,
+            avatarUrl: profile.profilePicUrl,
+            contextText: userText,
+            isSilhouette: profile.isSilhouette,
+          });
+          gender = genderResult.gender;
+        } catch (err) {
+          await logError('determineCustomerGender', err, { psid });
+          gender = 'UNKNOWN';
+        }
       }
     }
 
@@ -407,6 +415,7 @@ export async function runFlowTurn(
           phone: result.leadPhone,
           customerName,
           source,
+          psid,
         });
         finalRecord = { ...finalRecord, assignedStaff };
       } catch (err) {
@@ -616,15 +625,21 @@ async function handleFirstOpen(psid: string): Promise<void> {
         const nameAnalysis = analyzeVietnameseName(customerName, '');
         gender = nameAnalysis.gender;
       } else {
-        const profile = await fetchCustomerProfile(psid);
-        if (!customerName) customerName = profile.name;
-        if (!avatarUrl) avatarUrl = profile.profilePicUrl;
-        const genderResult = await determineCustomerGender({
-          customerName,
-          avatarUrl: profile.profilePicUrl,
-          isSilhouette: profile.isSilhouette,
-        });
-        gender = genderResult.gender;
+        try {
+          const profile = await fetchCustomerProfile(psid);
+          if (!customerName) customerName = profile.name;
+          if (!avatarUrl) avatarUrl = profile.profilePicUrl;
+          const genderResult = await determineCustomerGender({
+            customerName,
+            avatarUrl: profile.profilePicUrl,
+            isSilhouette: profile.isSilhouette,
+          });
+          gender = genderResult.gender;
+        } catch (err) {
+          // An toàn rơi về Tầng 3 (UNKNOWN) — không được để lỗi ở đây chặn việc gửi tin chào mở màn.
+          await logError('determineCustomerGender', err, { psid });
+          gender = 'UNKNOWN';
+        }
       }
     }
 
@@ -748,7 +763,7 @@ async function handleFirstCommentWithValidPhone(
 
   try {
     // Chốt lead trực tiếp từ comment -> cột E luôn là "Cmt" (mục 8, AC10/AC13).
-    const assignedStaff = await appendLead({ phone, customerName, source: 'Cmt' });
+    const assignedStaff = await appendLead({ phone, customerName, source: 'Cmt', psid: resolvedPsid });
     await saveConversation(resolvedPsid, {
       state: 'CLOSED',
       phone,

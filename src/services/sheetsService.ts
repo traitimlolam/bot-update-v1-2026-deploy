@@ -10,6 +10,14 @@ import { withRetry } from '../util/retry';
  */
 export type LeadSource = 'Tin nhắn' | 'Cmt';
 
+/**
+ * Cột H (mục 8): Meta Business Suite cần cả `asset_id` (Fanpage) lẫn `thread_type` để định tuyến
+ * đúng khung chat của khách — thiếu 1 trong 2 sẽ luôn nhảy về cuộc trò chuyện đầu tiên trong danh
+ * sách thay vì đúng khách. Đọc từ env để đổi Fanpage không cần sửa code; mặc định là Fanpage "Bất
+ * động sản giá rẻ Hòa Bình" đang vận hành.
+ */
+const FB_PAGE_ID = process.env.FB_PAGE_ID || '523264577527911';
+
 export interface LeadInput {
   /** Cột A: ngày ghi nhận dd/mm — mặc định thời điểm hiện tại, truyền tay được để test. */
   date?: Date;
@@ -19,6 +27,17 @@ export interface LeadInput {
   customerName: string | null;
   /** Cột E: kênh phát sinh lead — "Tin nhắn" (Messenger trực tiếp) hoặc "Cmt" (comment trên Page). */
   source: LeadSource;
+  /**
+   * Cột H: PSID Messenger của khách, dùng để dựng công thức `=HYPERLINK(...)` dẫn trực tiếp vào đúng
+   * khung chat của khách trên Meta Business Suite (theo chỉ đạo chủ dự án, mục 8) — URL cần cả
+   * `asset_id` (mã Fanpage, đọc từ `FB_PAGE_ID`) lẫn `thread_type=FB_MESSAGE`, thiếu 1 trong 2 thì
+   * Meta Business Suite không định tuyến được, luôn mở nhầm cuộc trò chuyện đầu tiên trong danh sách.
+   * KHÁC với "link Facebook cá nhân của khách" đã bị loại bỏ trước đó (dựng từ from.id, cần trình
+   * duyệt giả lập đăng nhập, rủi ro chính sách Facebook). Đây chỉ là ghép công thức tĩnh từ PSID bot
+   * đã có sẵn hợp lệ qua Send API, không gọi thêm API nào, không đăng nhập giả lập gì cả. Để trống
+   * (không truyền) nếu không lấy được PSID — cột H sẽ để trống, không ghi gì.
+   */
+  psid?: string;
 }
 
 function formatDateDDMM(date: Date): string {
@@ -335,6 +354,28 @@ export async function appendLead(lead: LeadInput): Promise<string> {
         requestBody: { values: [[lead.source]] },
       })
     );
+
+    // Ghi riêng cột H (mục 8, chỉ đạo chủ dự án): công thức HYPERLINK dẫn vào hộp thư Messenger dựng
+    // từ PSID — bỏ qua hoàn toàn nếu không có PSID, để cột H trống đúng như hành vi mặc định của dòng
+    // vừa append. valueInputOption phải là USER_ENTERED (khác RAW dùng cho các cột khác) để Google
+    // Sheet parse chuỗi "=HYPERLINK(...)" thành công thức bấm được thay vì ghi y nguyên dạng text.
+    // Bắt buộc phải có cả asset_id (Fanpage) và thread_type — thiếu 1 trong 2, Meta Business Suite sẽ
+    // không định tuyến được và luôn mở nhầm cuộc trò chuyện đầu tiên trong danh sách thay vì đúng khách.
+    if (lead.psid) {
+      const hyperlinkFormula =
+        `=HYPERLINK("https://business.facebook.com/latest/inbox/all?asset_id=${FB_PAGE_ID}&selected_item_id=${lead.psid}&thread_type=FB_MESSAGE", ` +
+        `"Link chat trực tiếp với khách trên Facebook")`;
+      await withRetry(() =>
+        sheets.spreadsheets.values.update({
+          spreadsheetId,
+          range: `'${targetSheetName}'!H${rowNumber}`,
+          valueInputOption: 'USER_ENTERED',
+          requestBody: {
+            values: [[hyperlinkFormula]],
+          },
+        })
+      );
+    }
 
     const existingValue = await withRetry(async () => {
       const res = await sheets.spreadsheets.values.get({

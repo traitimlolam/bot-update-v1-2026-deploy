@@ -161,22 +161,22 @@ describe('genderDetector', () => {
       );
     });
 
-    it('bỏ trống danh xưng Anh/Chị và điền đầy đủ cả họ tên của khách khi không xác định được giới tính', () => {
+    it('giữ nguyên "Anh/chị"/"anh/chị", tuyệt đối không gọi cộc lốc bằng tên riêng khi không xác định được giới tính', () => {
       const template1 = 'Em chào anh/chị.';
       const template3 = 'Anh/chị nhắn em số zalo nhé. Em gửi vị trí anh/chị tham khảo ạ.';
       const template5 = 'Anh/Chị chờ một chút, nhân viên tư vấn của bên em sẽ liên hệ với anh chị ngay đây ạ.';
 
-      expect(formatPersonalizedMessage(template1, 'Bay Nguyen')).toBe('Em chào Bay Nguyen.');
+      expect(formatPersonalizedMessage(template1, 'Bay Nguyen')).toBe('Em chào anh/chị.');
       expect(formatPersonalizedMessage(template3, 'Bay Nguyen')).toBe(
-        'Bay Nguyen nhắn em số zalo nhé. Em gửi vị trí Bay Nguyen tham khảo ạ.'
+        'Anh/chị nhắn em số zalo nhé. Em gửi vị trí anh/chị tham khảo ạ.'
       );
       expect(formatPersonalizedMessage(template5, 'Bay Nguyen')).toBe(
-        'Bay Nguyen chờ một chút, nhân viên tư vấn của bên em sẽ liên hệ với Bay Nguyen ngay đây ạ.'
+        'Anh/Chị chờ một chút, nhân viên tư vấn của bên em sẽ liên hệ với anh/chị ngay đây ạ.'
       );
 
-      expect(formatPersonalizedMessage(template1, 'Bình')).toBe('Em chào Bình.');
+      expect(formatPersonalizedMessage(template1, 'Bình')).toBe('Em chào anh/chị.');
       expect(formatPersonalizedMessage(template3, 'Bình')).toBe(
-        'Bình nhắn em số zalo nhé. Em gửi vị trí Bình tham khảo ạ.'
+        'Anh/chị nhắn em số zalo nhé. Em gửi vị trí anh/chị tham khảo ạ.'
       );
     });
 
@@ -292,6 +292,22 @@ describe('genderDetector', () => {
       expect(result.gender).toBe('FEMALE');
       expect(result.source).toBe('NAME');
       expect(result.callName).toBe('Mai');
+    });
+
+    it('Tầng 1 (tên) đã xác định rõ ràng -> KHÔNG gọi sang Tầng 2 (avatar), kể cả khi avatar mâu thuẫn', async () => {
+      const mockFetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: 'NU' } }] }),
+      } as Response);
+      global.fetch = mockFetch;
+
+      const result = await determineCustomerGender({
+        customerName: 'Nguyễn Trọng Hiếu',
+        avatarUrl: 'https://example.com/avatar_conflicting.jpg',
+      });
+      expect(result.gender).toBe('MALE');
+      expect(result.source).toBe('NAME');
+      expect(mockFetch).not.toHaveBeenCalled();
     });
 
     it('tên trung tính (Bình) kết hợp Avatar Nam -> MALE (AVATAR)', async () => {

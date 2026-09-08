@@ -140,7 +140,7 @@ describe('reminderService: Rà soát & gửi tin nhắn nhắc lúc 20h hàng ng
         'Thứ 7 này em có xe đưa đón xem đất miễn phí, chị có đi được không ạ?'
       );
       expect(formatPersonalizedMessage(LAND_TOUR_REMINDER_TEMPLATE, 'Bay Nguyen')).toBe(
-        'Thứ 7 này em có xe đưa đón xem đất miễn phí, Bay Nguyen có đi được không ạ?'
+        'Thứ 7 này em có xe đưa đón xem đất miễn phí, anh/chị có đi được không ạ?'
       );
       expect(formatPersonalizedMessage(LAND_TOUR_REMINDER_TEMPLATE, null)).toBe(
         'Thứ 7 này em có xe đưa đón xem đất miễn phí, anh/chị có đi được không ạ?'
