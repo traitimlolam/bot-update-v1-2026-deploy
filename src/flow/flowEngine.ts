@@ -10,6 +10,8 @@ export interface ConversationRecord {
   gender?: 'MALE' | 'FEMALE' | 'UNKNOWN' | null;
   avatarUrl?: string | null;
   customerMessageCount?: number;
+  askPhoneCount?: number;
+  lastAskedPhoneTurn?: number;
 }
 
 export interface PhoneCadenceResult {

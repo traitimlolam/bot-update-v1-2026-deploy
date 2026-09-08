@@ -226,23 +226,40 @@ async function resolveIntentText(
  * `resolveIntentTextFn`: bắt buộc phải truyền — mọi phần tử của `items` đều là `ReplyIntent`, cần
  * gọi AI (có fallback) để dịch ra câu chữ thật, không còn message code cố định nào để tự tra nữa.
  */
+/**
+ * Giới hạn cứng số lượng bong bóng: Mỗi lượt phản hồi CHỈ ĐƯỢC PHÉP BĂM TỐI ĐA 3 BONG BÓNG TIN NHẮN (tối đa 3 tin).
+ * Tuyệt đối không được băm thành 4 hay 5 tin nhắn.
+ * Nếu chuỗi câu trả lời tách ra nhiều hơn 3 đoạn, bắt buộc gộp các câu ngắn lại để đảm bảo mảng trả về có độ dài từ 1 đến 3 phần tử.
+ */
 export function splitMessageIntoBubbles(text: string): string[] {
   if (!text) return [];
   const clean = text.trim();
+  if (!clean) return [];
+  let parts: string[] = [];
+
   if (clean.includes('\n\n')) {
-    return clean
+    parts = clean
       .split(/\n{2,}/)
       .map((s) => s.trim())
       .filter(Boolean);
+  } else if (clean.includes('\n')) {
+    parts = clean
+      .split(/\n+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  } else {
+    return [clean];
   }
-  const lines = clean
-    .split(/\n+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (lines.length > 1 && lines.length <= 4) {
-    return lines;
-  }
-  return [clean];
+
+  if (parts.length === 0) return [clean];
+  if (parts.length <= 3) return parts;
+
+  // Nếu nhiều hơn 3 phần, bắt buộc gộp lại để tối đa đúng 3 bong bóng:
+  // Giữ phần cuối (thường là câu xin số / CTA) làm bong bóng thứ 3
+  const last = parts[parts.length - 1];
+  const first = parts[0];
+  const middle = parts.slice(1, parts.length - 1).join('\n\n');
+  return [first, middle, last].filter(Boolean);
 }
 
 async function sendMessageSequence(
@@ -310,15 +327,21 @@ export async function runFlowTurn(
 ): Promise<void> {
   await withLock(`psid:${psid}`, async () => {
     const current = await loadOrCreateConversation(psid);
-    const customerMessageCount = (current.customerMessageCount ?? 0) + 1;
+    const result = processInput(current, input);
+
+    // Nếu khách gửi số sai hoặc thiếu số (AI_PHONE_INVALID): không tính lượt này vào các mốc xin số thông thường
+    const isInvalidPhone = result.messagesToSend.length === 1 && result.messagesToSend[0].kind === 'AI_PHONE_INVALID';
+    const customerMessageCount = isInvalidPhone
+      ? (current.customerMessageCount ?? 0)
+      : (current.customerMessageCount ?? 0) + 1;
     current.customerMessageCount = customerMessageCount;
+
     // mục 5.2: chỉ khách NEW mới cần AI chào ở đầu câu trả lời.
     const isNewCustomer = current.state === 'NEW';
     // `commentId` khác null khi lượt này đến từ 1 bình luận (mục 5.3) — dùng để chọn recipient khi
     // gửi (giữ nguyên comment_id cho MỌI tin, xem `sendMessageSequence`) VÀ để lưu lại `lastCommentId`
     // cho `services/reminderService.ts` fallback đúng kiểu recipient khi gửi tin nhắc 20h (mục 5.4).
     const commentId = overrideRecipient && 'comment_id' in overrideRecipient ? overrideRecipient.comment_id : null;
-    const result = processInput(current, input);
 
     // Lấy tên và giới tính khách để xưng hô chuẩn xác: ưu tiên từ session, nếu chưa có thì fetch & phân tích
     let customerName = current.customerName ?? null;
@@ -357,14 +380,12 @@ export async function runFlowTurn(
       }
     }
 
+    const phoneCadence = getPhoneCadence(customerMessageCount, userText);
+
     if (result.messagesToSend.length > 0) {
       try {
         const targetRecipient: Recipient = overrideRecipient ?? { id: psid };
         const keepOriginal = commentId !== null;
-
-        // mục 4.2: đọc userText từ chính `input` của lượt này (TEXT/FEED_COMMENT) — dùng chung cho
-        // bất kỳ ReplyIntent nào xuất hiện trong messagesToSend (flowEngine chỉ bao giờ đặt tối đa 1).
-        const userText = input.type === 'TEXT' ? input.text : input.type === 'FEED_COMMENT' ? input.text ?? '' : '';
 
         // Khách mới (chưa từng nhận tin nào) nhắn tự do thẳng vào nội dung câu hỏi (không qua nút
         // bấm) -> tách lời chào ra thành 1 tin `AI_GREETING` riêng gửi TRƯỚC, rồi mới tới tin trả lời
@@ -379,7 +400,6 @@ export async function runFlowTurn(
           : result.messagesToSend;
 
         let updatedAiHistory: AiHistoryEntry[] | undefined;
-        const phoneCadence = getPhoneCadence(customerMessageCount, userText);
         const intentResolver = async (intent: ReplyIntent) => {
           // Đã tách chào thành tin riêng ở trên -> tin nội dung còn lại không cần AI tự chào lại nữa.
           const effectiveIsNewCustomer = shouldSplitGreeting ? false : isNewCustomer;
@@ -412,9 +432,18 @@ export async function runFlowTurn(
       }
     }
 
+    let askPhoneCount = current.askPhoneCount ?? 0;
+    let lastAskedPhoneTurn = current.lastAskedPhoneTurn;
+    if (phoneCadence.askPhone) {
+      askPhoneCount += 1;
+      lastAskedPhoneTurn = customerMessageCount;
+    }
+
     let finalRecord: ConversationRecord = {
       ...result.record,
       customerMessageCount,
+      askPhoneCount,
+      lastAskedPhoneTurn,
       customerName: customerName ?? current.customerName ?? null,
       gender: gender ?? current.gender ?? null,
       avatarUrl: avatarUrl ?? current.avatarUrl ?? null,

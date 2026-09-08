@@ -34,6 +34,14 @@ const FEMALE_MIDDLE_NAMES = new Set(['thi']);
 /**
  * Tên đệm phổ biến của NAM trong tiếng Việt.
  */
+/**
+ * Danh sách tên trung tính (dùng cho cả nam và nữ):
+ * Khi tên khách thuộc danh sách này và không có tên đệm rõ ràng (Thị/Văn...), tuyệt đối không đoán mò mà phải soi avatar hoặc giữ anh/chị.
+ */
+export const NEUTRAL_FIRST_NAMES = new Set([
+  "anh", "binh", "ha", "giang", "khanh", "minh", "thanh", "duong", "tu", "an", "quy"
+]);
+
 const MALE_MIDDLE_NAMES = new Set([
   'van', 'huu', 'dinh', 'duc', 'cong', 'ba', 'trong', 'viet', 'dang', 'khac', 'the', 'quoc'
 ]);
@@ -162,8 +170,21 @@ export function analyzeVietnameseName(
     }
   }
 
-  // 2. Kiểm tra tên chính (given name)
+  // 1b. Kiểm tra tên đệm nam (Văn, Hữu, Đình, Đức, Công,...)
+  for (let i = 1; i < normTokens.length - 1; i++) {
+    if (MALE_MIDDLE_NAMES.has(normTokens[i])) {
+      return { gender: 'MALE', callName };
+    }
+  }
+
+  // 2. Kiểm tra tên trung tính (Anh, Bình, Hà, Giang, Khánh, Minh, Thanh, Dương, Tú, An, Quý):
+  // Nếu không có tên đệm rõ ràng ở trên -> bắt buộc UNKNOWN để soi avatar hoặc dùng đại từ lịch sự anh/chị
   const givenNameNorm = removeVietnameseTones(callName).toLowerCase();
+  if (NEUTRAL_FIRST_NAMES.has(givenNameNorm)) {
+    return { gender: 'UNKNOWN', callName };
+  }
+
+  // 3. Kiểm tra tên chính (given name) thuần Nữ / thuần Nam
   const isFemaleGiven = FEMALE_FIRST_NAMES.has(givenNameNorm);
   const isMaleGiven = MALE_FIRST_NAMES.has(givenNameNorm);
 
@@ -172,13 +193,6 @@ export function analyzeVietnameseName(
   }
   if (isMaleGiven && !isFemaleGiven) {
     return { gender: 'MALE', callName };
-  }
-
-  // 3. Kiểm tra tên đệm nam (Văn, Hữu, Đình, Đức, Công,...)
-  for (let i = 1; i < normTokens.length - 1; i++) {
-    if (MALE_MIDDLE_NAMES.has(normTokens[i])) {
-      return { gender: 'MALE', callName };
-    }
   }
 
   // 4. Nếu tên gọi là tên trung tính hoặc không nằm trong từ điển -> UNKNOWN
@@ -247,7 +261,7 @@ export async function detectGenderFromAvatar(
   const routerBaseUrl = options?.routerBaseUrl || process.env.AI_ROUTER_URL || 'http://100.93.163.100:20128/v1';
   const routerApiKey = options?.routerApiKey || process.env.AI_ROUTER_API_KEY;
   const modelName = options?.modelName || process.env.AI_MODEL_NAME || 'ag/gemini-3.8-flash-high';
-  const timeoutMs = options?.timeoutMs || 6000;
+  const timeoutMs = options?.timeoutMs || 3000;
 
   try {
     const controller = new AbortController();

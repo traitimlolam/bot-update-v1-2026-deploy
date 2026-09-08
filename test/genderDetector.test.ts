@@ -107,6 +107,14 @@ describe('genderDetector', () => {
         gender: 'UNKNOWN',
         callName: 'Alex',
       });
+      // Danh sách 11 tên trung tính theo chỉ thị kỹ thuật:
+      const neutralNames = ['Anh', 'Bình', 'Hà', 'Giang', 'Khánh', 'Minh', 'Thanh', 'Dương', 'Tú', 'An', 'Quý'];
+      for (const n of neutralNames) {
+        expect(analyzeVietnameseName(n).gender).toBe('UNKNOWN');
+      }
+      // Tên trung tính nhưng có tên đệm rõ ràng:
+      expect(analyzeVietnameseName('Nguyễn Thị Hà').gender).toBe('FEMALE');
+      expect(analyzeVietnameseName('Trần Văn Minh').gender).toBe('MALE');
     });
 
     it('kết hợp ngữ cảnh tin nhắn (contextText) giải quyết tên trung tính hoặc không rõ', () => {

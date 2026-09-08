@@ -463,3 +463,64 @@ Thực hiện lần lượt, mỗi bước commit riêng, có test trước khi 
 - **AC14**: Khách đã `CLOSED` nhắn lại, không có số điện thoại khác → dòng lead cũ của khách (tra đúng theo số điện thoại đã ghi trên hồ sơ) được copy nguyên vẹn cột A-H sang tab "Hỏi lại", vào đúng dòng trống tiếp theo (bỏ qua các dòng đã có dữ liệu); tab tháng gốc chứa lead đó không bị chỉnh sửa gì. Khách hỏi lại nhiều lần **cách nhau trên 30 phút** → mỗi lần tạo thêm 1 dòng mới trên tab "Hỏi lại"; hỏi lại nhiều lần **trong vòng 30 phút kể từ lần ghi gần nhất** → chỉ dòng đầu tiên được ghi, các lần sau trong cùng cửa sổ 30 phút bị bỏ qua, không tạo thêm dòng (mục 8c, debounce mới).
 - **AC15**: Khách đã `CLOSED` gửi lại 1 số điện thoại **hợp lệ nhưng khác** số đã ghi → cột B của đúng dòng lead cũ trên tab tháng gốc được sửa thành số mới (các cột khác của dòng đó giữ nguyên), dòng **đã sửa** (không phải bản gốc) được copy sang tab "Hỏi lại", hồ sơ Firestore của khách cũng cập nhật sang số mới để lần hỏi lại tiếp theo tra cứu đúng (mục 6, 8c).
 - **AC16**: Khi gọi Gemini API lỗi/timeout (đã hết số lần retry của `withRetry`, mục 10) hoặc trả về chuỗi rỗng → bot vẫn gửi cho khách đúng 1 câu trả lời dự phòng (nguyên văn `aiFallbackText`) thay vì im lặng hoặc bỏ lượt, đồng thời `logError` được ghi lại để theo dõi tần suất fallback (mục 4.2, 10).
+
+
+---
+
+## 15. Chỉ thị kỹ thuật toàn diện và chuẩn xác dành cho bot Fanpage (Cập nhật 08/09/2026)
+
+### 15.1. Bàn giao người thật chat (Human Takeover) - Chống bot chen ngang
+- **Bắt sự kiện tin nhắn từ quản trị viên / nhân viên (Echo Event):**
+  - Khi `event.message.is_echo === true`:
+    - Nếu `app_id` trùng với `FB_APP_ID` của bot: bỏ qua (tin bot tự gửi).
+    - Nếu không có `app_id` hoặc `app_id !== FB_APP_ID` (người thật thao tác trên Meta Business Suite hoặc app Messenger/Facebook):
+      - Lấy `recipient_id` (PSID của khách).
+      - Cập nhật ngay vào Firestore: `lastHumanReplyAt = Date.now()`.
+      - Return ngay lập tức, không đưa vào luồng AI.
+- **Khóa mõm bot trong thời gian người thật tiếp quản:**
+  - Đầu hàm `handleMessagingEvent` và `handleMappedCommentTurn`:
+    - Đọc dữ liệu cuộc hội thoại của khách từ Firestore.
+    - Điều kiện: `Date.now() - conversation.lastHumanReplyAt < 10 * 60 * 1000` (trong vòng 10 phút kể từ tin nhắn cuối của người thật):
+      - Bot giữ im lặng tuyệt đối 100%, return ngay lập tức.
+    - Quá 10 phút mà nhân viên không nhắn thêm gì và khách nhắn tiếp câu mới, bot tự động hoạt động trở lại.
+
+### 15.2. Giới hạn độ dài câu trả lời và quy tắc băm tối đa 3 tin nhắn
+- **Trong `src/ai/geminiService.ts`:**
+  - Mỗi lượt trả lời chỉ được phép viết 2-3 câu ngắn gọn (tổng độ dài dưới 60 từ), `max_tokens: 250`.
+  - Văn phong đi thẳng vào trọng tâm (vị trí, giá, đường đi, pháp lý). Tự nhiên như người thật gõ phím nhanh trên điện thoại.
+  - Nghiêm cấm giải thích dài dòng, không liệt kê lan man khi khách chưa hỏi sâu.
+- **Trong `src/webhook/facebook.ts` (`splitMessageIntoBubbles` và `sendMessageSequence`):**
+  - Giới hạn cứng: mỗi lượt phản hồi chỉ được phép băm tối đa 3 bong bóng tin nhắn (từ 1 đến 3 tin). Tuyệt đối không băm thành 4 hay 5 tin.
+  - Nếu câu trả lời tách ra > 3 đoạn, bắt buộc gộp các câu giữa lại để mảng có tối đa 3 phần tử.
+  - Bong bóng thứ 3 dành cho câu xin số Zalo/điện thoại (khi có cờ xin số).
+  - Duy trì độ trễ tự nhiên từ 2 đến 3 giây giữa các tin nhắn kèm typing indicator (`getRandomMessageDelayMs`).
+
+### 15.3. Nhịp điệu xin số điện thoại chuẩn xác theo số lượt chat
+- Sử dụng `customerMessageCount` và `askPhoneCount` trong Firestore:
+  - **Mốc 1 (Lượt chat thứ 3):** Khách trao đổi được 2 câu cơ bản, đến tin thứ 3 bot giải đáp và ở bong bóng thứ 3 lịch sự xin số Zalo lần đầu tiên kèm lợi ích thiết thực (sơ đồ phân lô, bảng giá chi tiết). Cập nhật `askPhoneCount = 1` và lưu `lastAskedPhoneTurn = 3`.
+  - **Mốc 2 (Lượt chat thứ 6):** Lượt 4 và 5 nhiệt tình giải đáp đúng trọng tâm, TUYỆT ĐỐI KHÔNG xin số ở 2 tin này. Đến tin thứ 6 khách vẫn chưa cho số, bot mới lịch sự nhắc xin số lần 2 nhẹ nhàng. Cập nhật `askPhoneCount = 2`.
+  - **Mốc 3 (Từ lượt thứ 7 trở đi):** Tế nhị, chỉ nhắc nhẹ khi cách tối thiểu 4-5 lượt chat hoặc khi khách hỏi sâu về thủ tục pháp lý, đặt cọc, hoặc lịch xe đi xem đất thực tế.
+  - **Khi có số điện thoại:** Khách gửi số hợp lệ -> ngắt toàn bộ quy tắc xin số, ghi Google Sheet, chia sale round-robin, chuyển trạng thái sang CLOSED và gửi 1 tin xác nhận. Khách gửi số sai/thiếu (`AI_PHONE_INVALID`) -> gửi câu thông báo kiểm tra lại số, không tính lượt này vào các mốc xin số thông thường.
+
+### 15.4. Chống trả lời trùng lặp câu chữ
+- AI đối chiếu kỹ toàn bộ mảng lịch sử `aiHistory`.
+- Tuyệt đối không lặp lại kiểu câu mở đầu giữa các lượt chat liên tiếp.
+- Đã chào ở lượt trước thì lượt sau không chào lại, đi thẳng vào trả lời câu hỏi.
+
+### 15.5. Nhận diện giới tính đa tầng và soi avatar chuẩn xác
+- **Tên thuần Nam:** Văn, Hùng, Dũng, Cường, Thắng, Tuấn, Đức, Hoàng, Long, Hải, Sơn, Nam, Quân, Huy, Thành, Quang, Việt, Phúc, Thịnh, Kiên, Trung, Trọng, Tiến, Toàn, Khoa, Đạt, Khôi, Vũ, Nghĩa, Phong, Bách, Triều, Hiếu, Bảo...
+- **Tên thuần Nữ:** Thị, Hoa, Mai, Lan, Hương, Thảo, Trang, Linh, Hằng, Ngân, Thủy, Yến, Dung, Nga, Phương, Hạnh, Vân, Ngọc, Nhung, Trâm, Oanh, Thư, Quyên, Huệ, Diệp, Loan, Quỳnh, My, Diệu, Thắm, Cúc...
+- **Tên trung tính:** Anh, Bình, Hà, Giang, Khánh, Minh, Thanh, Dương, Tú, An, Quý.
+- **Xử lý tên trung tính & không rõ ràng:**
+  - Không đoán mò, fallback về UNKNOWN để kích hoạt soi avatar qua Gemini Vision (timeout tối đa 3 giây).
+  - Avatar nhận diện rõ Nam -> xưng em, gọi anh.
+  - Avatar nhận diện rõ Nữ -> xưng em, gọi chị.
+  - Avatar phong cảnh, hoa lá, đồ vật, che mặt, timeout -> fallback về đại từ lịch sự "anh/chị". Tuyệt đối không gọi cộc lốc bằng tên riêng.
+  - Khách tự xưng "anh"/"chị" trong tin nhắn -> ưu tiên tuyệt đối theo khách.
+
+### 15.6. Cài đặt thông tin người đăng bài trên Fanpage
+- Thông tin cố định ở chân toàn bộ bài viết tự động trong `src/services/autoPostService.ts`:
+  ```
+  Người đăng: Nguyễn Trọng Hiếu
+  Hotline / Zalo tư vấn và xe đưa đón xem đất: 0916.060.254
+  ```
