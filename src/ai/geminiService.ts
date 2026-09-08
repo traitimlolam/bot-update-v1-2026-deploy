@@ -1,4 +1,5 @@
 import { AREA_KNOWLEDGE_BASE } from '../config/knowledgeBase';
+import { loadMessages } from '../config/loadConfig';
 import { analyzeVietnameseName, Gender } from '../utils/genderDetector';
 import { withRetry } from '../util/retry';
 import { ReplyIntent, ReplyTopic } from '../flow/flowEngine';
@@ -19,7 +20,7 @@ import { PhoneErrorType } from '../flow/phoneValidator';
  * Funnel) trước khi go-live trên Cloud Run — xem thêm `AI_ROUTER_API_KEY` bên dưới nếu endpoint đó
  * cần xác thực.
  */
-const ROUTER_BASE_URL = process.env.AI_ROUTER_URL || 'http://100.93.163.100:20128/v1';
+const ROUTER_BASE_URL = process.env.AI_ROUTER_URL || 'http://34.124.234.83:20129/v1';
 const MODEL_NAME = process.env.AI_MODEL_NAME || 'ag/gemini-3.8-flash-high';
 /**
  * Tuỳ chọn — chỉ cần set khi endpoint public (Cloudflare Tunnel...) của router có đặt lớp xác thực
@@ -172,10 +173,23 @@ export interface GenerateAiReplyParams {
  * Gọi bộ não 9Router máy chủ qua OpenAI-compatible API (mục 4.2) — bọc `withRetry` (mục 10) như
  * mọi lời gọi ra ngoài khác.
  */
+function getSafeFallbackText(customerName: string | null, knownGender?: Gender | null, userText?: string): string {
+  const fallback = loadMessages().aiFallbackText;
+  const effectiveGender =
+    knownGender && knownGender !== 'UNKNOWN' ? knownGender : analyzeVietnameseName(customerName, userText ?? '').gender;
+  if (effectiveGender === 'MALE') {
+    return fallback.replace(/anh\/chị/g, 'anh').replace(/Anh\/chị/g, 'Anh');
+  } else if (effectiveGender === 'FEMALE') {
+    return fallback.replace(/anh\/chị/g, 'chị').replace(/Anh\/chị/g, 'Chị');
+  }
+  return fallback;
+}
+
 export async function generateAiReply(params: GenerateAiReplyParams): Promise<string> {
   const { intent, userText, history, customerName, isNewCustomer, knownGender } = params;
 
-  return withRetry(async () => {
+  try {
+    return await withRetry(async () => {
     // Phân tích lịch sử hội thoại để kiểm soát tần suất xin số & chống lặp:
     const phoneAskCount = history.filter(
       (h) => h.role === 'model' && /(số zalo|số điện thoại|sđt|inbox số|gửi số|để lại số)/i.test(h.text)
@@ -248,5 +262,9 @@ export async function generateAiReply(params: GenerateAiReplyParams): Promise<st
     }
 
     return text;
-  });
+    });
+  } catch (error) {
+    console.error('[generateAiReply] Lỗi khi gọi AI Router, sử dụng câu trả lời dự phòng an toàn:', error);
+    return getSafeFallbackText(customerName, knownGender, userText);
+  }
 }
