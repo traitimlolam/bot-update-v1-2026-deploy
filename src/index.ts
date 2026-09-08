@@ -23,7 +23,7 @@ app.use(
 
 app.get('/webhook', verifyWebhook);
 
-app.post('/webhook', (req: Request & { rawBody?: Buffer }, res: Response) => {
+app.post('/webhook', async (req: Request & { rawBody?: Buffer }, res: Response) => {
   const signature = req.header('X-Hub-Signature-256');
 
   if (!verifySignature(req.rawBody ?? Buffer.from(''), signature, FB_APP_SECRET)) {
@@ -31,9 +31,12 @@ app.post('/webhook', (req: Request & { rawBody?: Buffer }, res: Response) => {
     return;
   }
 
-  handleWebhookEvent(req, res).catch((err) => {
-    console.error('[handleWebhookEvent] unexpected error after response sent', err);
-  });
+  try {
+    await handleWebhookEvent(req, res);
+  } catch (err) {
+    console.error('[handleWebhookEvent] unexpected error', err);
+    if (!res.headersSent) res.sendStatus(500);
+  }
 });
 
 import { runDailyReminderSweep, startDailyReminderScheduler } from './services/reminderService';

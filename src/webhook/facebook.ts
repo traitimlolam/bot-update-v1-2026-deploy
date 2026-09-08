@@ -116,7 +116,11 @@ async function callSendApi(body: Record<string, unknown>): Promise<{ recipient_i
 export type Recipient = { id: string } | { comment_id: string };
 
 export async function sendTypingOn(recipient: Recipient): Promise<void> {
-  await callSendApi({ recipient, sender_action: 'typing_on' });
+  try {
+    await callSendApi({ recipient, sender_action: 'typing_on' });
+  } catch (err) {
+    console.warn('[sendTypingOn] Bỏ qua lỗi typing_on (không làm gián đoạn gửi tin nhắn):', err);
+  }
 }
 
 export async function sendText(recipient: Recipient, text: string): Promise<string | undefined> {
@@ -594,6 +598,8 @@ async function fetchCustomerName(psid: string): Promise<string | null> {
 
 async function handleMessagingEvent(event: MessagingEvent): Promise<void> {
   const psid = event.sender.id;
+  const text = event.message?.text;
+  console.log(`[handleMessagingEvent] Nhận tin nhắn từ PSID ${psid}: "${text ?? ''}"`);
 
   // Kiểm tra Human Takeover (nhường người thật chat trong vòng 10 phút)
   const conversation = await getConversation(psid);
@@ -614,7 +620,6 @@ async function handleMessagingEvent(event: MessagingEvent): Promise<void> {
     return;
   }
 
-  const text = event.message?.text;
   if (typeof text === 'string' && text.length > 0) {
     await runFlowTurn(psid, { type: 'TEXT', text }, () => fetchCustomerName(psid));
   }
@@ -997,12 +1002,6 @@ interface WebhookBody {
 }
 
 export async function handleWebhookEvent(req: Request, res: Response): Promise<void> {
-  // Trả 200 ngay để tránh Facebook retry trùng lặp; xử lý nghiệp vụ chạy nền.
-  res.sendStatus(200);
-
-  // Response đã gửi ở trên — từ đây về sau TUYỆT ĐỐI không được để lỗi thoát ra ngoài hàm này
-  // (index.ts gọi .catch() chỉ để log, không phải next(), vì gọi next() sau khi đã sendStatus
-  // sẽ gây crash ERR_HTTP_HEADERS_SENT). Bọc toàn bộ phần còn lại trong 1 try/catch tổng.
   try {
     const body = req.body as WebhookBody | undefined;
     if (!body || body.object !== 'page') return;
@@ -1048,6 +1047,10 @@ export async function handleWebhookEvent(req: Request, res: Response): Promise<v
     }
   } catch (err) {
     await logError('handleWebhookEvent', err, { body: req.body });
+  } finally {
+    if (!res.headersSent) {
+      res.sendStatus(200);
+    }
   }
 }
 
