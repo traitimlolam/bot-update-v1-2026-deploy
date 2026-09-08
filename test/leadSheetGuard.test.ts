@@ -13,8 +13,6 @@ jest.mock('../src/state/firestore', () => ({
   updateAiHistory: jest.fn().mockResolvedValue(undefined),
   setLastCommentId: jest.fn().mockResolvedValue(undefined),
   logError: jest.fn().mockResolvedValue(undefined),
-  isHumanTakeoverActive: jest.fn(() => false),
-  setLastHumanReplyAt: jest.fn().mockResolvedValue(undefined),
   getDb: jest.fn(() => ({
     collection: jest.fn(() => ({
       doc: jest.fn(() => ({
@@ -52,7 +50,7 @@ import {
   updateLeadPhoneAndCopyToFollowUpSheet,
 } from '../src/services/sheetsService';
 import { generateAiReply } from '../src/ai/geminiService';
-import { runFlowTurn, handleFeedChange, handleFirstOpen, handleMessagingEvent, isNoAvatar, blockUserOnPage } from '../src/webhook/facebook';
+import { runFlowTurn, handleFeedChange, handleFirstOpen } from '../src/webhook/facebook';
 
 const mockedGetConversation = getConversation as jest.Mock;
 const mockedSaveConversation = saveConversation as jest.Mock;
@@ -81,10 +79,7 @@ describe('runFlowTurn: appendLead chỉ được gọi khi số điện thoại 
     mockedGenerateAiReply.mockResolvedValue('Đây là câu trả lời AI mẫu.');
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({
-        recipient_id: 'RESOLVED_PSID',
-        profile_pic: 'https://example.com/real_photo.jpg',
-      }),
+      json: async () => ({ recipient_id: 'RESOLVED_PSID' }),
       text: async () => '',
     }) as unknown as typeof fetch;
   });
@@ -396,10 +391,7 @@ describe('runFlowTurn: appendLead chỉ được gọi khi số điện thoại 
   it('handleFeedChange sau khi xử lý comment xong -> tự động gọi Graph API ẩn comment (is_hidden=true)', async () => {
     (global.fetch as jest.Mock).mockResolvedValue({
       ok: true,
-      json: async () => ({
-        recipient_id: 'RESOLVED_PSID',
-        profile_pic: 'https://example.com/real_photo.jpg',
-      }),
+      json: async () => ({ recipient_id: 'RESOLVED_PSID' }),
       text: async () => '',
     });
 
@@ -529,208 +521,5 @@ describe('runFlowTurn: appendLead chỉ được gọi khi số điện thoại 
       expect(mockedCopyLeadToFollowUpSheet).toHaveBeenCalledWith('0987654321');
       expect(mockedTouchFollowUpTracked).toHaveBeenCalledWith('RESOLVED_PSID');
     });
-
-  describe('No-Avatar Filter (bộ lọc chặn khách không có avatar ở cổng đón tiếp đầu tiên)', () => {
-    describe('blockUserOnPage qua Meta Graph API', () => {
-      it('gọi đúng endpoint POST /{page_id}/blocked với tham số psid cho khách Messenger', async () => {
-        (global.fetch as jest.Mock).mockResolvedValue({
-          ok: true,
-          json: async () => ({ success: true }),
-          text: async () => '',
-        });
-
-        const success = await blockUserOnPage({ psid: 'PSID_TEST_BLOCK' });
-        expect(success).toBe(true);
-
-        const calls = (global.fetch as jest.Mock).mock.calls;
-        const blockCall = calls.find(
-          (c) => typeof c[0] === 'string' && c[0].includes('/blocked') && c[0].includes('psid=PSID_TEST_BLOCK')
-        );
-        expect(blockCall).toBeDefined();
-        expect(blockCall[1]?.method).toBe('POST');
-      });
-
-      it('gọi đúng endpoint POST /{page_id}/blocked với tham số user cho khách từ comment', async () => {
-        (global.fetch as jest.Mock).mockResolvedValue({
-          ok: true,
-          json: async () => ({ success: true }),
-          text: async () => '',
-        });
-
-        const success = await blockUserOnPage({ user: 'USER_COMMENT_BLOCK' });
-        expect(success).toBe(true);
-
-        const calls = (global.fetch as jest.Mock).mock.calls;
-        const blockCall = calls.find(
-          (c) => typeof c[0] === 'string' && c[0].includes('/blocked') && c[0].includes('user=USER_COMMENT_BLOCK')
-        );
-        expect(blockCall).toBeDefined();
-        expect(blockCall[1]?.method).toBe('POST');
-      });
-
-      it('xử lý an toàn khi Graph API trả về lỗi hoặc mạng ngắt kết nối', async () => {
-        (global.fetch as jest.Mock).mockRejectedValue(new Error('Connection refused'));
-
-        const success = await blockUserOnPage({ psid: 'PSID_ERR' });
-        expect(success).toBe(false);
-      });
-    });
-
-    describe('isNoAvatar logic', () => {
-      it('trả về true khi avatarUrl là null, undefined, chuỗi rỗng hoặc chỉ có khoảng trắng', () => {
-        expect(isNoAvatar(null)).toBe(true);
-        expect(isNoAvatar(undefined)).toBe(true);
-        expect(isNoAvatar('')).toBe(true);
-        expect(isNoAvatar('   ')).toBe(true);
-      });
-
-      it('trả về true khi avatarUrl chứa các từ khóa ảnh mặc định của Meta (silhouette, default-avatar, platform/profilepic)', () => {
-        expect(isNoAvatar('https://static.xx.fbcdn.net/rsrc.php/v3/yL/r/silhouette-user.png')).toBe(true);
-        expect(isNoAvatar('https://example.com/images/default-avatar-200.jpg')).toBe(true);
-        expect(isNoAvatar('https://platform-lookaside.fbsbx.com/platform/profilepic/?psid=123')).toBe(true);
-      });
-
-      it('trả về true khi cờ isSilhouette === true từ Graph API', () => {
-        expect(isNoAvatar('https://example.com/some_photo.jpg', true)).toBe(true);
-      });
-
-      it('trả về false khi avatarUrl là ảnh thật hợp lệ và isSilhouette không bật', () => {
-        expect(isNoAvatar('https://scontent.xx.fbcdn.net/v/t39.30808-6/real_photo.jpg', false)).toBe(false);
-      });
-    });
-
-    describe('handleMessagingEvent với bộ lọc No-Avatar', () => {
-      it('khách nhắn tin nhưng avatarUrl là null -> return ngay, không gọi AI, không lưu conversation', async () => {
-        (global.fetch as jest.Mock).mockResolvedValue({
-          ok: true,
-          json: async () => ({ name: 'Clone User', profile_pic: null }),
-          text: async () => '',
-        });
-
-        await handleMessagingEvent({
-          sender: { id: 'PSID_NO_AVATAR' },
-          message: { text: 'Chào shop tư vấn' },
-        });
-
-        expect(mockedGenerateAiReply).not.toHaveBeenCalled();
-        expect(mockedSaveConversation).not.toHaveBeenCalled();
-        expect(mockedAppendLead).not.toHaveBeenCalled();
-
-        // Kiểm tra lệnh block qua Meta Graph API
-        const calls = (global.fetch as jest.Mock).mock.calls;
-        const blockCall = calls.find(
-          (c) => typeof c[0] === 'string' && c[0].includes('/blocked') && c[0].includes('psid=PSID_NO_AVATAR')
-        );
-        expect(blockCall).toBeDefined();
-        expect(blockCall[1]?.method).toBe('POST');
-      });
-
-      it('khách nhắn tin nhưng avatar chứa silhouette -> return ngay, không gửi tin', async () => {
-        (global.fetch as jest.Mock).mockResolvedValue({
-          ok: true,
-          json: async () => ({
-            name: 'Silhouette User',
-            profile_pic: 'https://static.xx.fbcdn.net/rsrc.php/v3/silhouette.png',
-          }),
-          text: async () => '',
-        });
-
-        await handleMessagingEvent({
-          sender: { id: 'PSID_SILHOUETTE' },
-          message: { text: 'Tôi muốn mua đất' },
-        });
-
-        expect(mockedGenerateAiReply).not.toHaveBeenCalled();
-        expect(mockedSaveConversation).not.toHaveBeenCalled();
-      });
-
-      it('khách có avatar thật -> vượt qua bộ lọc No-Avatar và được xử lý bình thường', async () => {
-        (global.fetch as jest.Mock).mockResolvedValue({
-          ok: true,
-          json: async () => ({
-            name: 'Real User',
-            profile_pic: 'https://scontent.xx.fbcdn.net/v/t39.30808-6/real_user.jpg',
-          }),
-          text: async () => '',
-        });
-
-        await handleMessagingEvent({
-          sender: { id: 'PSID_REAL_USER' },
-          message: { text: 'Tôi muốn mua đất 0912345678' },
-        });
-
-        expect(mockedAppendLead).toHaveBeenCalledWith(
-          expect.objectContaining({ phone: '0912345678', psid: 'PSID_REAL_USER' })
-        );
-      });
-    });
-
-    describe('handleFeedChange với bộ lọc No-Avatar', () => {
-      it('commenter không có avatar (profile_pic null) -> return ngay, không gửi tin, không chốt lead, không ẩn comment', async () => {
-        (global.fetch as jest.Mock).mockResolvedValue({
-          ok: true,
-          json: async () => ({ name: 'No Avatar Commenter', profile_pic: null }),
-          text: async () => '',
-        });
-
-        await handleFeedChange({
-          item: 'comment',
-          verb: 'add',
-          comment_id: 'CMT_NO_AVATAR',
-          from: { id: 'USER_NO_AVATAR', name: 'No Avatar Commenter' },
-          message: 'Báo giá lô đất 0912345678',
-        });
-
-        expect(mockedAppendLead).not.toHaveBeenCalled();
-        expect(mockedGenerateAiReply).not.toHaveBeenCalled();
-        expect(mockedSaveConversation).not.toHaveBeenCalled();
-
-        // Kiểm tra lệnh block qua Meta Graph API
-        const calls = (global.fetch as jest.Mock).mock.calls;
-        const blockCall = calls.find(
-          (c) => typeof c[0] === 'string' && c[0].includes('/blocked') && c[0].includes('user=USER_NO_AVATAR')
-        );
-        expect(blockCall).toBeDefined();
-        expect(blockCall[1]?.method).toBe('POST');
-      });
-
-      it('commenter có avatar chứa default-avatar -> return ngay', async () => {
-        (global.fetch as jest.Mock).mockResolvedValue({
-          ok: true,
-          json: async () => ({
-            name: 'Default Avatar User',
-            profile_pic: 'https://example.com/default-avatar.png',
-          }),
-          text: async () => '',
-        });
-
-        await handleFeedChange({
-          item: 'comment',
-          verb: 'add',
-          comment_id: 'CMT_DEFAULT_AVATAR',
-          from: { id: 'USER_DEFAULT_AVATAR', name: 'Default Avatar User' },
-          message: 'Tư vấn giúp em',
-        });
-
-        expect(mockedGenerateAiReply).not.toHaveBeenCalled();
-        expect(mockedSaveConversation).not.toHaveBeenCalled();
-      });
-
-      it('lỗi mạng khi kiểm tra avatar -> bắt lỗi an toàn qua try/catch, không làm sập tiến trình', async () => {
-        (global.fetch as jest.Mock).mockRejectedValue(new Error('Network timeout fetching profile'));
-
-        await expect(
-          handleFeedChange({
-            item: 'comment',
-            verb: 'add',
-            comment_id: 'CMT_NET_ERR',
-            from: { id: 'USER_NET_ERR', name: 'Net Error User' },
-            message: 'Tư vấn giúp em',
-          })
-        ).resolves.not.toThrow();
-      });
-    });
-  });
-
   });
 });
