@@ -12,7 +12,7 @@ export interface ConversationRecord {
   customerMessageCount?: number;
   askPhoneCount?: number;
   lastAskedPhoneTurn?: number | null;
-  lastProcessedMessageAt?: number | any | null;
+  lastProcessedMessageAt?: number | { toMillis?: () => number } | null;
 }
 
 export interface PhoneCadenceResult {
@@ -31,10 +31,10 @@ export function isDeepInquiryText(text: string): boolean {
 
 /**
  * Xác định tần suất và nhịp điệu xin số điện thoại theo 3 mốc:
- * - Mốc 1 (Bong bóng chat thứ 3): Lần đầu xin số lịch sự kèm lý do mang lại lợi ích cho khách (sơ đồ phân lô, bảng giá chi tiết).
- * - Mốc 2 (Tin nhắn thứ 6 của khách): Nhắc xin số lần 2 nhẹ nhàng sau khi đã giải đáp chu đáo các tin 4 và 5.
+ * - Mốc 1 (Lượt hỏi đầu tiên - Bong bóng thứ 3): Lần đầu xin số lịch sự kèm lý do mang lại lợi ích cho khách (sơ đồ phân lô, bảng giá chi tiết).
+ * - Mốc 2 (Tin nhắn thứ 6 của khách): Nhắc xin số lần 2 nhẹ nhàng sau khi đã giải đáp chu đáo các tin 2 đến 5.
  * - Mốc 3 (Từ tin thứ 7 trở đi): Tế nhị, chỉ hỏi khi cách 4-5 lượt chat (11, 16, 21...) hoặc khi khách hỏi sâu về thủ tục pháp lý, đặt cọc hay xem đất thực tế.
- * - Các lượt khác (1, 2, 4, 5, hoặc các lượt >=7 không có hỏi sâu): Cờ xin số tắt (askPhone: false).
+ * - Các lượt khác (2, 3, 4, 5, hoặc các lượt >=7 không có hỏi sâu): Cờ xin số tắt (askPhone: false).
  */
 export function getPhoneCadence(customerMessageCount: number, text: string = ''): PhoneCadenceResult {
   // Mốc 1 (Ngay lượt hỏi đầu tiên): Cố định 3 bong bóng (chào - trả lời - xin số Zalo gửi tài liệu)
@@ -73,12 +73,12 @@ export type ReplyTopic = 'location' | 'legal' | 'price';
  * quyết định nội dung câu chữ và không tự gọi API (vẫn là hàm thuần — mục 3).
  */
 export type ReplyIntent =
-  | { kind: 'AI_GREETING' }
+  | { kind: 'AI_GREETING'; askPhone?: boolean; milestone?: 1 | 2 | 3 }
   | { kind: 'AI_TOPIC'; topic: ReplyTopic; askPhone?: boolean; milestone?: 1 | 2 | 3 }
   | { kind: 'AI_FREE_TEXT'; askPhone?: boolean; milestone?: 1 | 2 | 3 }
-  | { kind: 'AI_PHONE_CONFIRMED' }
-  | { kind: 'AI_PHONE_INVALID'; errorType: PhoneErrorType }
-  | { kind: 'AI_FOLLOWUP_CLOSED' };
+  | { kind: 'AI_PHONE_CONFIRMED'; askPhone?: boolean; milestone?: 1 | 2 | 3 }
+  | { kind: 'AI_PHONE_INVALID'; errorType: PhoneErrorType; askPhone?: boolean; milestone?: 1 | 2 | 3 }
+  | { kind: 'AI_FOLLOWUP_CLOSED'; askPhone?: boolean; milestone?: 1 | 2 | 3 };
 
 /**
  * `AI_GREETING` KHÔNG bao giờ do `processInput` trả về — chỉ dùng ở lớp gọi ngoài

@@ -225,7 +225,7 @@ export function analyzeVietnameseName(
   }
 
   const cleaned = fullName
-    .replace(/[0-9!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/g, ' ')
+    .replace(/[0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 

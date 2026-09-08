@@ -168,15 +168,11 @@ export function describeIntent(
   const askPhone =
     overrideAskPhone !== undefined
       ? overrideAskPhone
-      : 'askPhone' in intent
-      ? (intent as any).askPhone
-      : undefined;
+      : intent.askPhone;
   const milestone =
     overrideMilestone !== undefined
       ? overrideMilestone
-      : 'milestone' in intent
-      ? (intent as any).milestone
-      : undefined;
+      : intent.milestone;
 
   const phoneHint = buildPhoneGuidance(askPhone, milestone);
 
@@ -240,15 +236,11 @@ export async function generateAiReply(params: GenerateAiReplyParams): Promise<st
     const shouldAskPhone =
       params.shouldAskPhone !== undefined
         ? params.shouldAskPhone
-        : 'askPhone' in intent
-        ? (intent as any).askPhone
-        : undefined;
+        : intent.askPhone;
     const phoneMilestone =
       params.phoneMilestone !== undefined
         ? params.phoneMilestone
-        : 'milestone' in intent
-        ? (intent as any).milestone
-        : undefined;
+        : intent.milestone;
 
     // Phân tích lịch sử hội thoại để kiểm soát tần suất xin số & chống lặp:
     const alreadyGreeted = history.some(
@@ -294,6 +286,7 @@ export async function generateAiReply(params: GenerateAiReplyParams): Promise<st
         max_tokens: 250,
         stream: false,
       }),
+      signal: AbortSignal.timeout(8000),
     });
 
     if (!response.ok) {

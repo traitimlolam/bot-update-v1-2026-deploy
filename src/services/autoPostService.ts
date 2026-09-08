@@ -1,3 +1,4 @@
+import { getDb } from "../state/firestore";
 import { AREA_KNOWLEDGE_BASE } from "../config/knowledgeBase";
 
 export type PostTopic = "MORNING" | "NOON" | "EVENING";
@@ -23,11 +24,11 @@ export interface AutoPostResult {
 }
 
 // 1. Cấu hình AI Router & Meta Graph API
-const ROUTER_BASE_URL = process.env.AI_ROUTER_URL || "http://100.93.163.100:20127/v1";
+const ROUTER_BASE_URL = process.env.AI_ROUTER_URL || "http://34.124.234.83:20129/v1";
 const MODEL_NAME = process.env.AI_MODEL_NAME || "ag/gemini-3.8-flash-high";
 const ROUTER_API_KEY =
   process.env.AI_ROUTER_API_KEY ||
-  (ROUTER_BASE_URL.includes("100.93.163.100") ? "sk-6bc6c7cc0898de2d-n44te0-912e33fb" : "123456");
+  "123456";
 
 const GRAPH_BASE_URL = "https://graph.facebook.com/v19.0";
 const AI_TIMEOUT_MS = 25000;
@@ -272,7 +273,7 @@ export function cleanCaption(rawContent: string): string {
   text = text.replace(/\*\*/g, "");
 
   // 4. Xóa dấu ngoặc kép bọc ngoài bài viết nếu AI vô tình thêm vào
-  text = text.replace(/^[\"“](.*)[\"”]$/s, "$1").trim();
+  text = text.replace(/^["“](.*)["”]$/s, "$1").trim();
 
   // 5. Kiểm tra an toàn bắt buộc: luôn chèn cố định thông tin hotline trước hashtag
   let before = text;
@@ -369,52 +370,6 @@ ${HOTLINE_LINE}
   }
 }
 
-/**
- * Tìm ảnh động theo từ khóa tiếng Việt về Hòa Bình qua công cụ tìm kiếm mở
- */
-export async function searchDynamicHoaBinhImage(query: string): Promise<string | null> {
-  try {
-    const tokenUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}&t=h_&iax=images&ia=images`;
-    const res = await fetch(tokenUrl, {
-      headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)" },
-      signal: AbortSignal.timeout(3500),
-    });
-    const html = await res.text();
-    const vqdMatch = html.match(/vqd="([^"]+)"/) || html.match(/vqd=([\d-]+)/);
-    if (!vqdMatch) return null;
-
-    const vqd = vqdMatch[1];
-    const apiUrl = `https://duckduckgo.com/i.js?l=wt-wt&o=json&q=${encodeURIComponent(query)}&vqd=${vqd}&f=,,,&p=1`;
-    const apiRes = await fetch(apiUrl, {
-      headers: { "User-Agent": "Mozilla/5.0" },
-      signal: AbortSignal.timeout(3500),
-    });
-    const data = (await apiRes.json()) as { results?: Array<{ image?: string }> };
-
-    for (const item of (data.results || []).slice(0, 10)) {
-      const u = item.image;
-      if (!u || !u.startsWith("https://")) continue;
-      if (u.includes("scr.vn") || u.includes("pinterest") || u.includes("facebook") || u.includes("shopee")) continue;
-      if (u.endsWith(".jpg") || u.endsWith(".jpeg") || u.endsWith(".png")) {
-        try {
-          const head = await fetch(u, {
-            method: "HEAD",
-            headers: { "User-Agent": "facebookexternalhit/1.1" },
-            signal: AbortSignal.timeout(2000),
-          });
-          if (head.ok && head.headers.get("content-type")?.includes("image")) {
-            return u;
-          }
-        } catch {
-          // Bỏ qua link lỗi và thử link tiếp theo
-        }
-      }
-    }
-  } catch {
-    // Nếu tìm kiếm lỗi hoặc timeout, chuyển sang kho ảnh tuyển chọn
-  }
-  return null;
-}
 
 /**
  * 2. Tìm ảnh minh họa chất lượng cao: Ưu tiên tìm ảnh động Hòa Bình theo từ khóa tiếng Việt,
@@ -499,10 +454,51 @@ export async function executeAutoPost(topic?: PostTopic): Promise<AutoPostResult
     }
   }
 
+  // Chống đăng trùng lặp qua Firestore khi Cloud Run chạy đa instance
+  const now = new Date();
+  const vnDateStr = new Date(now.getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+  const slotKey = `${vnDateStr}_${targetTopic}`;
+  const db = getDb();
+  const postDocRef = db.collection("auto_posts").doc(slotKey);
+
+  if (process.env.NODE_ENV !== "test") {
+    try {
+      const existing = await postDocRef.get();
+      if (existing.exists) {
+        console.log(`[autoPost] Slot ${slotKey} đã được đăng trước đó bởi instance khác, bỏ qua.`);
+        const data = existing.data();
+        return {
+          success: true,
+          postId: data?.postId,
+          topic: targetTopic,
+          caption: data?.caption,
+          imageUrl: data?.imageUrl,
+        };
+      }
+    } catch {
+      // Bỏ qua lỗi truy vấn nếu có
+    }
+  }
+
   console.log(`[autoPost] Starting auto-post workflow for topic: ${targetTopic}`);
   const post = await generatePostContent(targetTopic);
   const imageUrl = await searchContextImageUrl(post.imageQuery, targetTopic, post.caption);
   const result = await publishPostToPage(post.caption, imageUrl);
+
+  if (result.success && result.id && process.env.NODE_ENV !== "test") {
+    try {
+      await postDocRef.set({
+        slot: slotKey,
+        topic: targetTopic,
+        postId: result.id,
+        caption: post.caption,
+        imageUrl,
+        createdAt: Date.now(),
+      });
+    } catch {
+      // Bỏ qua lỗi ghi Firestore
+    }
+  }
 
   return {
     success: result.success,

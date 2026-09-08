@@ -82,7 +82,7 @@ export interface StoredConversation extends ConversationRecord {
    * Mốc thời gian (ms hoặc Timestamp) gần nhất nhận được tin nhắn từ PSID này.
    * Dùng để khoá debounce chống trùng 4 giây giữa các webhook từ Facebook Ads.
    */
-  lastProcessedMessageAt?: number | Timestamp | null;
+  lastProcessedMessageAt?: number | Timestamp | { toMillis?: () => number } | null;
 }
 
 const CONVERSATIONS_COLLECTION = 'conversations';
@@ -308,16 +308,25 @@ export async function setLastHumanReplyAt(psid: string, timestampMs: number = Da
 }
 
 /**
+ * Chuyển đổi an toàn giá trị timestamp từ Firestore/number sang milliseconds.
+ */
+export function getTimestampMillis(
+  val?: number | Timestamp | { toMillis?: () => number } | null
+): number {
+  if (!val) return 0;
+  if (typeof val === "number") return val;
+  if (val instanceof Timestamp) return val.toMillis();
+  if (typeof val.toMillis === "function") return val.toMillis();
+  return 0;
+}
+
+/**
  * Kiểm tra xem chế độ Human Takeover có đang kích hoạt không (chưa quá 10 phút kể từ lúc nhân viên nhắn).
  */
-export function isHumanTakeoverActive(lastHumanReplyAt?: number | Timestamp | null): boolean {
-  if (!lastHumanReplyAt) return false;
-  const lastMs =
-    typeof lastHumanReplyAt === "number"
-      ? lastHumanReplyAt
-      : lastHumanReplyAt instanceof Timestamp
-      ? lastHumanReplyAt.toMillis()
-      : (lastHumanReplyAt as any)?.toMillis?.() || 0;
+export function isHumanTakeoverActive(
+  lastHumanReplyAt?: number | Timestamp | { toMillis?: () => number } | null
+): boolean {
+  const lastMs = getTimestampMillis(lastHumanReplyAt);
   if (!lastMs) return false;
   return Date.now() - lastMs < HUMAN_TAKEOVER_TIMEOUT_MS;
 }

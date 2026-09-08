@@ -18,6 +18,7 @@ import {
   getConversation,
   getDb,
   isHumanTakeoverActive,
+  getTimestampMillis,
   logError,
   saveConversation,
   setLastCommentId,
@@ -109,10 +110,7 @@ export async function isPsidDebounced(psid: string, debounceMs: number = 4000): 
   try {
     const conv = await getConversation(psid);
     if (conv?.lastProcessedMessageAt) {
-      const lastTime =
-        typeof conv.lastProcessedMessageAt === 'number'
-          ? conv.lastProcessedMessageAt
-          : (conv.lastProcessedMessageAt as any)?.toMillis?.() ?? 0;
+      const lastTime = getTimestampMillis(conv.lastProcessedMessageAt);
       if (lastTime > 0 && now - lastTime < debounceMs) {
         return true;
       }
@@ -201,6 +199,7 @@ async function callSendApi(body: Record<string, unknown>): Promise<{ recipient_i
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(10000),
     });
     if (!response.ok) {
       const text = await response.text();
@@ -467,12 +466,14 @@ export async function runFlowTurn(
   await withLock(`psid:${psid}`, async () => {
     const current = await loadOrCreateConversation(psid);
 
+    // Kiểm tra lại Human Takeover ngay bên trong lock: nếu nhân viên đang chat trực tiếp, bot lập tức giữ im lặng
+    if (isHumanTakeoverActive(current.lastHumanReplyAt)) {
+      console.log(`[humanTakeover] Bot giữ im lặng vì nhân viên đang chat trực tiếp với PSID ${psid}`);
+      return;
+    }
+
     // Khóa chống trùng theo thời gian (Debounce 4 giây bên trong withLock):
-    const lastProcessed = current?.lastProcessedMessageAt
-      ? typeof current.lastProcessedMessageAt === 'number'
-        ? current.lastProcessedMessageAt
-        : (current.lastProcessedMessageAt as any)?.toMillis?.() ?? 0
-      : 0;
+    const lastProcessed = getTimestampMillis(current?.lastProcessedMessageAt);
     if (lastProcessed > 0 && Date.now() - lastProcessed < 4000) {
       console.log(`[runFlowTurn] Bỏ qua vì tin nhắn trước đó của PSID ${psid} vừa được xử lý cách đây ${Date.now() - lastProcessed}ms (< 4s)`);
       return;
@@ -501,32 +502,30 @@ export async function runFlowTurn(
 
     const userText = input.type === 'TEXT' ? input.text : input.type === 'FEED_COMMENT' ? input.text ?? '' : '';
 
-    if (!customerName && _getCustomerName) {
-      customerName = await _getCustomerName();
-    }
-
-    if (!gender) {
+    if (!customerName || !gender) {
       if (process.env.NODE_ENV === 'test') {
-        const nameAnalysis = analyzeVietnameseName(customerName, userText);
-        gender = nameAnalysis.gender;
+        if (!customerName && _getCustomerName) customerName = await _getCustomerName();
+        if (!gender) {
+          const nameAnalysis = analyzeVietnameseName(customerName, userText);
+          gender = nameAnalysis.gender;
+        }
       } else {
         try {
-          // Tầng 1 (tên) đã UNKNOWN/không đủ tin cậy -> lấy avatar để phục vụ Tầng 2. Nếu bất kỳ
-          // bước nào ở đây lỗi, bắt lại tại đây và rơi về Tầng 3 (UNKNOWN, giữ "anh/chị") thay vì để
-          // lỗi thoát ra ngoài làm gián đoạn việc gửi trả lời cho khách.
           const profile = await fetchCustomerProfile(psid);
           if (!customerName) customerName = profile.name;
           if (!avatarUrl) avatarUrl = profile.profilePicUrl;
-          const genderResult = await determineCustomerGender({
-            customerName,
-            avatarUrl: profile.profilePicUrl,
-            contextText: userText,
-            isSilhouette: profile.isSilhouette,
-          });
-          gender = genderResult.gender;
+          if (!gender) {
+            const genderResult = await determineCustomerGender({
+              customerName,
+              avatarUrl: profile.profilePicUrl,
+              contextText: userText,
+              isSilhouette: profile.isSilhouette,
+            });
+            gender = genderResult.gender;
+          }
         } catch (err) {
           await logError('determineCustomerGender', err, { psid });
-          gender = 'UNKNOWN';
+          if (!gender) gender = 'UNKNOWN';
         }
       }
     }
@@ -722,7 +721,8 @@ export async function fetchCustomerProfile(psid: string): Promise<CustomerProfil
   // Bước 1: Query User Profile Node
   try {
     const userRes = await fetch(
-      `${GRAPH_BASE_URL}/${psid}?fields=first_name,last_name,name,profile_pic&access_token=${pageAccessToken}`
+      `${GRAPH_BASE_URL}/${psid}?fields=first_name,last_name,name,profile_pic&access_token=${pageAccessToken}`,
+      { signal: AbortSignal.timeout(3500) }
     );
     if (userRes.ok) {
       const userData = (await userRes.json()) as {
@@ -749,7 +749,7 @@ export async function fetchCustomerProfile(psid: string): Promise<CustomerProfil
   if (!name) {
     try {
       const convUrl = `${GRAPH_BASE_URL}/me/conversations?user_id=${psid}&fields=participants,senders&access_token=${pageAccessToken}`;
-      const convRes = await fetch(convUrl);
+      const convRes = await fetch(convUrl, { signal: AbortSignal.timeout(3500) });
       if (convRes.ok) {
         const convData = (await convRes.json()) as {
           data?: Array<{
@@ -774,7 +774,8 @@ export async function fetchCustomerProfile(psid: string): Promise<CustomerProfil
   if (!profilePicUrl) {
     try {
       const picRes = await fetch(
-        `${GRAPH_BASE_URL}/${psid}/picture?type=large&redirect=false&access_token=${pageAccessToken}`
+        `${GRAPH_BASE_URL}/${psid}/picture?type=large&redirect=false&access_token=${pageAccessToken}`,
+        { signal: AbortSignal.timeout(3500) }
       );
       if (picRes.ok) {
         const picData = (await picRes.json()) as {
@@ -857,12 +858,12 @@ async function handleFirstOpen(psid: string): Promise<void> {
       if (current && current.state === 'CLOSED') {
         return;
       }
+      if (current && isHumanTakeoverActive(current.lastHumanReplyAt)) {
+        console.log(`[humanTakeover] Bỏ qua handleFirstOpen vì nhân viên đang chat trực tiếp với PSID ${psid}`);
+        return;
+      }
       // Khóa chống trùng theo thời gian (Debounce 4 giây bên trong withLock):
-      const lastProcessed = current?.lastProcessedMessageAt
-        ? typeof current.lastProcessedMessageAt === 'number'
-          ? current.lastProcessedMessageAt
-          : (current.lastProcessedMessageAt as any)?.toMillis?.() ?? 0
-        : 0;
+      const lastProcessed = getTimestampMillis(current?.lastProcessedMessageAt);
       if (lastProcessed > 0 && Date.now() - lastProcessed < 4000) {
         console.log(`[handleFirstOpen] Bỏ qua vì tin nhắn trước đó của PSID ${psid} vừa được xử lý cách đây ${Date.now() - lastProcessed}ms (< 4s)`);
         return;

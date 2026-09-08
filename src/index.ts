@@ -2,6 +2,8 @@ import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import { handleWebhookEvent, verifySignature, verifyWebhook } from './webhook/facebook';
 import { PRIVACY_POLICY_HTML } from './privacyPolicy';
+import { runDailyReminderSweep, startDailyReminderScheduler } from './services/reminderService';
+import { executeAutoPost, startAutoPostScheduler, PostTopic } from './services/autoPostService';
 
 const FB_APP_SECRET = process.env.FB_APP_SECRET;
 if (!FB_APP_SECRET) {
@@ -39,8 +41,6 @@ app.post('/webhook', async (req: Request & { rawBody?: Buffer }, res: Response) 
   }
 });
 
-import { runDailyReminderSweep, startDailyReminderScheduler } from './services/reminderService';
-import { executeAutoPost, startAutoPostScheduler, PostTopic } from './services/autoPostService';
 
 app.get('/privacy', (_req, res) => res.type('html').send(PRIVACY_POLICY_HTML));
 app.get('/data-deletion', (_req, res) => res.type('html').send(PRIVACY_POLICY_HTML));

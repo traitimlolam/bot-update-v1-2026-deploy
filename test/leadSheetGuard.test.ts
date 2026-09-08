@@ -6,23 +6,28 @@
  */
 import { ConversationRecord } from '../src/flow/flowEngine';
 
-jest.mock('../src/state/firestore', () => ({
-  getConversation: jest.fn(),
-  saveConversation: jest.fn().mockResolvedValue(undefined),
-  touchFollowUpTracked: jest.fn().mockResolvedValue(undefined),
-  updateAiHistory: jest.fn().mockResolvedValue(undefined),
-  setLastCommentId: jest.fn().mockResolvedValue(undefined),
-  logError: jest.fn().mockResolvedValue(undefined),
-  getDb: jest.fn(() => ({
-    collection: jest.fn(() => ({
-      doc: jest.fn(() => ({
-        get: jest.fn().mockResolvedValue({ exists: false, data: () => ({}) }),
-        set: jest.fn().mockResolvedValue(undefined),
+jest.mock('../src/state/firestore', () => {
+  const actual = jest.requireActual('../src/state/firestore');
+  return {
+    ...actual,
+    getConversation: jest.fn(),
+    saveConversation: jest.fn().mockResolvedValue(undefined),
+    touchFollowUpTracked: jest.fn().mockResolvedValue(undefined),
+    updateAiHistory: jest.fn().mockResolvedValue(undefined),
+    setLastCommentId: jest.fn().mockResolvedValue(undefined),
+    logError: jest.fn().mockResolvedValue(undefined),
+    getDb: jest.fn(() => ({
+      collection: jest.fn(() => ({
+        doc: jest.fn(() => ({
+          get: jest.fn().mockResolvedValue({ exists: false, data: () => ({}) }),
+          set: jest.fn().mockResolvedValue(undefined),
+        })),
       })),
     })),
-  })),
-  withLock: jest.fn((_key: string, fn: () => Promise<unknown>) => fn()),
-}));
+    withLock: jest.fn((_key: string, fn: () => Promise<unknown>) => fn()),
+    isHumanTakeoverActive: jest.fn(() => false),
+  };
+});
 
 jest.mock('../src/services/sheetsService', () => ({
   appendLead: jest.fn().mockResolvedValue('Lê Cường'),
