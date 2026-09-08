@@ -322,30 +322,6 @@ async function findLastValidAssignmentAcrossTabs(
  * retry cả hàm: `rowNumber` chỉ được xác định 1 lần rồi tái sử dụng, nên nếu bước ghi cột F thất bại
  * và phải thử lại, bước ghi cột A-C KHÔNG bị lặp lại vào dòng mới (tránh trùng lead khi retry).
  */
-/**
- * Lấy threadId (inbox item ID) từ Graph API để tạo URL mở đúng cuộc trò chuyện trong Meta Business Suite.
- * Graph API: GET /me/conversations?user_id=${psid}&fields=id,link
- * link trả về có dạng: "/{page_id}/inbox/{thread_id}/?section=messages"
- */
-export async function resolveFacebookThreadId(psid: string): Promise<string | null> {
-  const pageAccessToken = process.env.FB_PAGE_ACCESS_TOKEN;
-  if (!pageAccessToken) return null;
-
-  try {
-    const url = `https://graph.facebook.com/v19.0/me/conversations?user_id=${psid}&fields=id,link&access_token=${pageAccessToken}`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const data = (await res.json()) as { data?: Array<{ link?: string }> };
-    const link = data.data?.[0]?.link;
-    if (!link) return null;
-    const match = link.match(/\/inbox\/(\d+)\//);
-    return match ? match[1] : null;
-  } catch (err) {
-    console.error('[resolveFacebookThreadId] Lỗi khi lấy threadId từ Graph API:', err);
-    return null;
-  }
-}
-
 export async function appendLead(lead: LeadInput): Promise<string> {
   const spreadsheetId = process.env.GOOGLE_SHEET_ID;
   if (!spreadsheetId) {
@@ -377,28 +353,6 @@ export async function appendLead(lead: LeadInput): Promise<string> {
         range: `'${targetSheetName}'!E${rowNumber}`,
         valueInputOption: 'RAW',
         requestBody: { values: [[lead.source]] },
-      })
-    );
-
-    // Ghi riêng cột H (mục 8, chỉ đạo chủ dự án): công thức HYPERLINK dẫn vào hộp thư Messenger dựng
-    // từ PSID — bỏ qua hoàn toàn nếu không có PSID, để cột H trống đúng như hành vi mặc định của dòng
-    // vừa append. valueInputOption phải là USER_ENTERED (khác RAW dùng cho các cột khác) để Google
-    // Sheet parse chuỗi "=HYPERLINK(...)" thành công thức bấm được thay vì ghi y nguyên dạng text.
-    // Bắt buộc phải có cả asset_id (Fanpage) và thread_type — thiếu 1 trong 2, Meta Business Suite sẽ
-    // không định tuyến được và luôn mở nhầm cuộc trò chuyện đầu tiên trong danh sách thay vì đúng khách.
-    // Ghi cột H: Link tìm kiếm và xem trang cá nhân Facebook của khách hàng để thẩm định tiềm năng
-    const fbFormula = lead.customerName
-      ? `=HYPERLINK("https://www.facebook.com/search/people/?q=" & ENCODEURL(C${rowNumber}); "Xem Facebook: " & C${rowNumber})`
-      : `=HYPERLINK("https://www.facebook.com/search/top/?q=" & ENCODEURL(B${rowNumber}); "Tìm FB theo SĐT")`;
-
-    await withRetry(() =>
-      sheets.spreadsheets.values.update({
-        spreadsheetId,
-        range: `'${targetSheetName}'!H${rowNumber}`,
-        valueInputOption: 'USER_ENTERED',
-        requestBody: {
-          values: [[fbFormula]],
-        },
       })
     );
 
