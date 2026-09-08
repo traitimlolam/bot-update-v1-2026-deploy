@@ -52,7 +52,7 @@ import {
   updateLeadPhoneAndCopyToFollowUpSheet,
 } from '../src/services/sheetsService';
 import { generateAiReply } from '../src/ai/geminiService';
-import { runFlowTurn, handleFeedChange, handleFirstOpen, handleMessagingEvent, isNoAvatar } from '../src/webhook/facebook';
+import { runFlowTurn, handleFeedChange, handleFirstOpen, handleMessagingEvent, isNoAvatar, blockUserOnPage } from '../src/webhook/facebook';
 
 const mockedGetConversation = getConversation as jest.Mock;
 const mockedSaveConversation = saveConversation as jest.Mock;
@@ -531,6 +531,51 @@ describe('runFlowTurn: appendLead chỉ được gọi khi số điện thoại 
     });
 
   describe('No-Avatar Filter (bộ lọc chặn khách không có avatar ở cổng đón tiếp đầu tiên)', () => {
+    describe('blockUserOnPage qua Meta Graph API', () => {
+      it('gọi đúng endpoint POST /{page_id}/blocked với tham số psid cho khách Messenger', async () => {
+        (global.fetch as jest.Mock).mockResolvedValue({
+          ok: true,
+          json: async () => ({ success: true }),
+          text: async () => '',
+        });
+
+        const success = await blockUserOnPage({ psid: 'PSID_TEST_BLOCK' });
+        expect(success).toBe(true);
+
+        const calls = (global.fetch as jest.Mock).mock.calls;
+        const blockCall = calls.find(
+          (c) => typeof c[0] === 'string' && c[0].includes('/blocked') && c[0].includes('psid=PSID_TEST_BLOCK')
+        );
+        expect(blockCall).toBeDefined();
+        expect(blockCall[1]?.method).toBe('POST');
+      });
+
+      it('gọi đúng endpoint POST /{page_id}/blocked với tham số user cho khách từ comment', async () => {
+        (global.fetch as jest.Mock).mockResolvedValue({
+          ok: true,
+          json: async () => ({ success: true }),
+          text: async () => '',
+        });
+
+        const success = await blockUserOnPage({ user: 'USER_COMMENT_BLOCK' });
+        expect(success).toBe(true);
+
+        const calls = (global.fetch as jest.Mock).mock.calls;
+        const blockCall = calls.find(
+          (c) => typeof c[0] === 'string' && c[0].includes('/blocked') && c[0].includes('user=USER_COMMENT_BLOCK')
+        );
+        expect(blockCall).toBeDefined();
+        expect(blockCall[1]?.method).toBe('POST');
+      });
+
+      it('xử lý an toàn khi Graph API trả về lỗi hoặc mạng ngắt kết nối', async () => {
+        (global.fetch as jest.Mock).mockRejectedValue(new Error('Connection refused'));
+
+        const success = await blockUserOnPage({ psid: 'PSID_ERR' });
+        expect(success).toBe(false);
+      });
+    });
+
     describe('isNoAvatar logic', () => {
       it('trả về true khi avatarUrl là null, undefined, chuỗi rỗng hoặc chỉ có khoảng trắng', () => {
         expect(isNoAvatar(null)).toBe(true);
@@ -570,6 +615,14 @@ describe('runFlowTurn: appendLead chỉ được gọi khi số điện thoại 
         expect(mockedGenerateAiReply).not.toHaveBeenCalled();
         expect(mockedSaveConversation).not.toHaveBeenCalled();
         expect(mockedAppendLead).not.toHaveBeenCalled();
+
+        // Kiểm tra lệnh block qua Meta Graph API
+        const calls = (global.fetch as jest.Mock).mock.calls;
+        const blockCall = calls.find(
+          (c) => typeof c[0] === 'string' && c[0].includes('/blocked') && c[0].includes('psid=PSID_NO_AVATAR')
+        );
+        expect(blockCall).toBeDefined();
+        expect(blockCall[1]?.method).toBe('POST');
       });
 
       it('khách nhắn tin nhưng avatar chứa silhouette -> return ngay, không gửi tin', async () => {
@@ -631,6 +684,14 @@ describe('runFlowTurn: appendLead chỉ được gọi khi số điện thoại 
         expect(mockedAppendLead).not.toHaveBeenCalled();
         expect(mockedGenerateAiReply).not.toHaveBeenCalled();
         expect(mockedSaveConversation).not.toHaveBeenCalled();
+
+        // Kiểm tra lệnh block qua Meta Graph API
+        const calls = (global.fetch as jest.Mock).mock.calls;
+        const blockCall = calls.find(
+          (c) => typeof c[0] === 'string' && c[0].includes('/blocked') && c[0].includes('user=USER_NO_AVATAR')
+        );
+        expect(blockCall).toBeDefined();
+        expect(blockCall[1]?.method).toBe('POST');
       });
 
       it('commenter có avatar chứa default-avatar -> return ngay', async () => {

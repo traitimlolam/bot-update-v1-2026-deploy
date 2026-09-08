@@ -610,15 +610,66 @@ export function isNoAvatar(avatarUrl?: string | null, isSilhouette?: boolean): b
   return defaultKeywords.some((keyword) => lower.includes(keyword));
 }
 
+/**
+ * Block (chặn vĩnh viễn) người dùng trên Fanpage qua Meta Graph API chính thức:
+ * Gửi request: POST https://graph.facebook.com/v19.0/{page_id}/blocked
+ * - Khách từ Messenger: tham số psid=[PSID]
+ * - Khách từ bình luận: tham số user=[commenterId] (hoặc psid nếu có)
+ */
+export async function blockUserOnPage(target: { psid?: string; user?: string }): Promise<boolean> {
+  const pageAccessToken = process.env.FB_PAGE_ACCESS_TOKEN;
+  if (!pageAccessToken) {
+    console.warn('[blockUserOnPage] Thiếu FB_PAGE_ACCESS_TOKEN');
+    return false;
+  }
+
+  const pageId = process.env.FB_PAGE_ID || 'me';
+  const query = target.psid
+    ? `&psid=${encodeURIComponent(target.psid)}`
+    : target.user
+    ? `&user=${encodeURIComponent(target.user)}`
+    : '';
+  const url = `${GRAPH_BASE_URL}/${pageId}/blocked?access_token=${pageAccessToken}${query}`;
+
+  try {
+    const payload: { psid?: string; user?: string } = {};
+    if (target.psid) payload.psid = target.psid;
+    if (target.user) payload.user = target.user;
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = (await res.json().catch(() => ({}))) as { success?: boolean; error?: unknown };
+    if (!res.ok) {
+      console.error('[blockUserOnPage] Graph API trả về lỗi khi block:', data?.error || res.statusText);
+      return false;
+    }
+    return data.success ?? true;
+  } catch (err) {
+    console.error('[blockUserOnPage] Lỗi mạng khi gọi API block user:', err);
+    return false;
+  }
+}
+
 async function handleMessagingEvent(event: MessagingEvent): Promise<void> {
   const psid = event.sender.id;
 
-  // [Bộ lọc No-Avatar] Chặn khách không có ảnh đại diện ở cổng đón tiếp đầu tiên
+  // [Bộ lọc No-Avatar & BLOCK] Chặn vĩnh viễn khách không có ảnh đại diện ở cổng đón tiếp đầu tiên
   try {
     const profile = await fetchCustomerProfile(psid);
     const avatarUrl = profile.profilePicUrl;
     if (isNoAvatar(avatarUrl, profile.isSilhouette)) {
-      console.log(`Bỏ qua tin nhắn do khách không có avatar (PSID: ${psid})`);
+      try {
+        await blockUserOnPage({ psid });
+        console.log(`Đã block vĩnh viễn người dùng không có avatar trên Fanpage (PSID: ${psid})`);
+      } catch (blockErr) {
+        console.error(`[blockUser] Lỗi khi block user PSID ${psid}:`, blockErr);
+      }
       return;
     }
   } catch (err) {
@@ -989,14 +1040,19 @@ async function handleFeedChange(value: FeedCommentValue, pageId?: string): Promi
   const commenterId = value.from.id;
   const commentId = value.comment_id;
 
-  // [Bộ lọc No-Avatar] Chặn khách không có ảnh đại diện ở cổng đón tiếp đầu tiên
+  // [Bộ lọc No-Avatar & BLOCK] Chặn vĩnh viễn khách không có ảnh đại diện ở cổng đón tiếp đầu tiên
   try {
     const profile = await fetchCustomerProfile(commenterId);
     const avatarUrl = profile.profilePicUrl;
     if (isNoAvatar(avatarUrl, profile.isSilhouette)) {
-      console.log(
-        `Bỏ qua tin nhắn do khách không có avatar (Commenter: ${commenterId}, Comment: ${commentId})`
-      );
+      try {
+        await blockUserOnPage({ user: commenterId });
+        console.log(
+          `Đã block vĩnh viễn người dùng không có avatar trên Fanpage (Commenter: ${commenterId}, Comment: ${commentId})`
+        );
+      } catch (blockErr) {
+        console.error(`[blockUser] Lỗi khi block commenter ${commenterId}:`, blockErr);
+      }
       return;
     }
   } catch (err) {
