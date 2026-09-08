@@ -393,8 +393,9 @@ export async function appendLead(lead: LeadInput): Promise<string> {
         targetItemId = (await resolveFacebookThreadId(lead.psid)) || lead.psid;
       }
       // Dùng dấu chấm phẩy ; cho Google Sheet locale vi_VN để tránh lỗi cú pháp #ERROR!
+      const bpnId = process.env.FB_BPN_ID || '1126426985565027';
       const hyperlinkFormula =
-        `=HYPERLINK("https://business.facebook.com/latest/inbox/all?asset_id=${FB_PAGE_ID}&selected_item_id=${targetItemId}&thread_type=FB_MESSAGE"; ` +
+        `=HYPERLINK("https://business.facebook.com/latest/inbox/all?bpn_id=${bpnId}&asset_id=${FB_PAGE_ID}&nav_ref=manage_page_ap_plus_default&selected_item_id=${targetItemId}"; ` +
         `"Link chat trực tiếp với khách trên Facebook")`;
       await withRetry(() =>
         sheets.spreadsheets.values.update({
