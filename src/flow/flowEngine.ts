@@ -37,12 +37,16 @@ export function isDeepInquiryText(text: string): boolean {
  * - Các lượt khác (1, 2, 4, 5, hoặc các lượt >=7 không có hỏi sâu): Cờ xin số tắt (askPhone: false).
  */
 export function getPhoneCadence(customerMessageCount: number, text: string = ''): PhoneCadenceResult {
-  if (customerMessageCount === 3) {
+  // Mốc 1 (Ngay lượt hỏi đầu tiên): Cố định 3 bong bóng (chào - trả lời - xin số Zalo gửi tài liệu)
+  if (customerMessageCount === 1) {
     return { askPhone: true, milestone: 1 };
   }
+  // Các lượt 2, 3, 4, 5: TẮT xin số, chỉ trả lời 1-2 câu giải đáp thắc mắc
   if (customerMessageCount === 6) {
+    // Mốc 2 (Tin nhắn thứ 6 của khách): Lịch sự nhắc lại câu xin số lần 2
     return { askPhone: true, milestone: 2 };
   }
+  // Mốc 3 (Từ tin thứ 7 trở đi): Tế nhị, chỉ hỏi khi cách 4-5 lượt chat hoặc khi khách hỏi sâu
   if (customerMessageCount >= 7) {
     const isPeriodic = (customerMessageCount - 6) % 5 === 0;
     const isDeepInquiry = isDeepInquiryText(text);

@@ -141,7 +141,7 @@ export function buildPhoneGuidance(askPhone?: boolean, milestone?: 1 | 2 | 3): s
   }
   if (askPhone === true) {
     if (milestone === 1) {
-      return '[CỜ XIN SỐ: BẬT - MỐC 1 (tin nhắn thứ 3 của khách): Sau khi giải đáp thắc mắc, hãy bắt đầu lịch sự xin số điện thoại/Zalo lần đầu tiên kèm một lý do chính đáng và mang lại lợi ích thiết thực cho khách (ví dụ: Em có sẵn sơ đồ phân lô và bảng giá chi tiết từng vị trí, anh/chị cho em xin số Zalo để em gửi qua cho mình tiện xem nhé). Mời khách để lại số Zalo/điện thoại một cách tự nhiên và lịch sự.]';
+      return '[CỜ XIN SỐ: BẬT - MỐC 1 (lượt hỏi đầu tiên): Trả lời thật ngắn gọn, đúng trọng tâm câu hỏi của khách (giá, diện tích, sổ đỏ, vị trí). TUYỆT ĐỐI KHÔNG hỏi vặn lại các câu hỏi mở khác (như hỏi mua đầu tư hay làm nhà vườn). Hệ thống tự động gửi bong bóng xin số Zalo với sơ đồ phân lô và bảng giá chi tiết từng vị trí.]';
     }
     if (milestone === 2) {
       return '[CỜ XIN SỐ: BẬT - MỐC 2 (tin nhắn thứ 6 của khách): Sau khi giải đáp nhiệt tình đúng trọng tâm câu hỏi của khách, hãy lịch sự nhắc xin số Zalo/điện thoại lần thứ 2 một cách nhẹ nhàng (ví dụ: để gửi tài liệu quy hoạch, bảng giá và bản đồ trích lục mới nhất). Mời khách để lại số Zalo/điện thoại.]';

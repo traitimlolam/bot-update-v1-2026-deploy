@@ -1,4 +1,4 @@
-import { splitMessageIntoBubbles, isDuplicateMid, isPsidDebounced, resetWebhookDeduplicationForTest, MAX_BUBBLES_PER_TURN } from "../src/webhook/facebook";
+import { splitMessageIntoBubbles, isDuplicateMid, isPsidDebounced, resetWebhookDeduplicationForTest, MAX_BUBBLES_PER_TURN, cleanAnswerBubble } from "../src/webhook/facebook";
 import { isHumanTakeoverActive } from "../src/state/firestore";
 import { Timestamp } from "@google-cloud/firestore";
 
@@ -136,5 +136,36 @@ describe("isPsidDebounced - Chống bão webhook Meta khi khách bấm quảng c
 
   it("khống chế MAX_BUBBLES_PER_TURN cố định là 3 bong bóng", () => {
     expect(MAX_BUBBLES_PER_TURN).toBe(3);
+  });
+});
+
+describe("cleanAnswerBubble - Làm sạch bong bóng thứ 2 ở lượt đầu", () => {
+  it("chuỗi rỗng trả về chuỗi rỗng", () => {
+    expect(cleanAnswerBubble("")).toBe("");
+  });
+
+  it("xóa lời chào mở đầu của AI (Dạ em chào anh/chị...)", () => {
+    const raw = "Dạ em chào anh ạ! Đất bên em ở Lạc Sơn Hòa Bình có giá từ 200 triệu một lô.";
+    expect(cleanAnswerBubble(raw)).toBe("Đất bên em ở Lạc Sơn Hòa Bình có giá từ 200 triệu một lô.");
+  });
+
+  it("xóa lời xin số điện thoại/Zalo ở cuối câu nếu AI tự chèn", () => {
+    const raw = "Đất bên em diện tích 100m2 full thổ cư đã có sổ riêng. Anh/chị cho em xin số Zalo để em gửi sơ đồ phân lô nhé!";
+    expect(cleanAnswerBubble(raw)).toBe("Đất bên em diện tích 100m2 full thổ cư đã có sổ riêng.");
+  });
+
+  it("xóa câu hỏi mở như hỏi mua đầu tư hay làm nhà vườn ở cuối câu", () => {
+    const raw = "Dự án nằm ngay mặt đường liên xã, giao thông thuận tiện. Anh muốn mua để đầu tư hay làm nhà vườn ạ?";
+    expect(cleanAnswerBubble(raw)).toBe("Dự án nằm ngay mặt đường liên xã, giao thông thuận tiện.");
+  });
+
+  it("xử lý đồng thời cả chào mở đầu, nội dung và câu hỏi mở ở cuối", () => {
+    const raw = "Chào chị! Đất bên em có sổ đỏ từng lô, công chứng ngay trong tuần. Chị mua để đầu tư hay nghỉ dưỡng ạ?";
+    expect(cleanAnswerBubble(raw)).toBe("Đất bên em có sổ đỏ từng lô, công chứng ngay trong tuần.");
+  });
+
+  it("giữ nguyên câu trả lời thuần thông tin dự án", () => {
+    const raw = "Đất bên em tại Lạc Sơn, Hòa Bình giá từ 200 triệu/lô, diện tích 100-120m2 full thổ cư, đã có sổ đỏ riêng.";
+    expect(cleanAnswerBubble(raw)).toBe(raw);
   });
 });

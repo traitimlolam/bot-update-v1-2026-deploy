@@ -205,16 +205,13 @@ describe('flowEngine.processInput', () => {
     });
   });
   describe('quy tắc 3 mốc xin số điện thoại theo lượt tin nhắn (getPhoneCadence)', () => {
-    it('lượt 1 và lượt 2: chưa xin số (khách mới bắt đầu trao đổi câu cơ bản)', () => {
-      expect(getPhoneCadence(1, 'alo em')).toEqual({ askPhone: false });
+    it('Mốc 1 (Ngay lượt hỏi đầu tiên): cố định 3 bong bóng và xin số Zalo kèm tài liệu', () => {
+      expect(getPhoneCadence(1, 'alo em')).toEqual({ askPhone: true, milestone: 1 });
+    });
+
+    it('lượt 2 đến lượt 5: chỉ giải đáp 1-2 câu, tuyệt đối không xin dồn dập (cờ tắt)', () => {
       expect(getPhoneCadence(2, 'dat o dau em')).toEqual({ askPhone: false });
-    });
-
-    it('Mốc 1 (Bong bóng chat thứ 3): lịch sự xin số điện thoại/Zalo lần đầu', () => {
-      expect(getPhoneCadence(3, 'gia the nao em')).toEqual({ askPhone: true, milestone: 1 });
-    });
-
-    it('lượt 4 và lượt 5: nhiệt tình giải đáp đúng trọng tâm câu hỏi, tuyệt đối không xin dồn dập', () => {
+      expect(getPhoneCadence(3, 'gia the nao em')).toEqual({ askPhone: false });
       expect(getPhoneCadence(4, 'duong vao rong bao nhieu')).toEqual({ askPhone: false });
       expect(getPhoneCadence(5, 'co gan cho khong em')).toEqual({ askPhone: false });
     });

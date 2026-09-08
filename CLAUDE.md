@@ -546,3 +546,13 @@ Thực hiện lần lượt, mỗi bước commit riêng, có test trước khi 
   5. **Khống chế cứng bong bóng tin nhắn:**
      - `splitMessageIntoBubbles`: Tối đa 2 đến 3 bong bóng. Nếu nội dung dài, tự động gộp các câu lại (giữ câu CTA/xin số ở bong bóng thứ 3), cấm băm thành 4-5 tin nhắn vụn.
      - `sendMessageSequence`: Biến `MAX_BUBBLES_PER_TURN = 3` ngắt vòng lặp gửi ngay khi đạt ngưỡng tối đa 3 bong bóng trong 1 lượt chat.
+
+### 15.9. Cố định 3 bong bóng ở lượt đầu tiên & Nhịp điệu xin số chuẩn mực
+- **Cấu trúc cố định 3 bong bóng ngay lượt khách hỏi đầu tiên (`customerMessageCount === 1`):**
+  - **Bong bóng 1:** Chào hỏi lịch sự theo đúng danh xưng cá nhân hóa (`Dạ em chào anh/chị ạ!`).
+  - **Bong bóng 2:** Trả lời ngắn gọn, đúng trọng tâm câu hỏi của khách (giá, diện tích, sổ đỏ, vị trí). Lọc sạch bằng `cleanAnswerBubble`: loại bỏ lời chào đầu câu (tránh trùng bong bóng 1), loại bỏ lời xin số ở cuối và loại bỏ các câu hỏi mở không cần thiết (mua đầu tư hay làm nhà vườn).
+  - **Bong bóng 3:** BẮT BUỘC câu xin số Zalo chuẩn mực kèm tài liệu: *"Em có sẵn sơ đồ phân lô và bảng giá chi tiết từng vị trí, anh/chị cho em xin số Zalo để em gửi qua cho mình tiện xem nhé!"* do lớp code ngoài (`facebook.ts`) tự động ghép, không phụ thuộc vào AI.
+- **Nhịp điệu các lượt tiếp theo:**
+  - Lượt 2 đến 5: Bot chỉ trả lời 1-2 câu giải đáp thắc mắc, tắt cờ xin số (`askPhone: false`).
+  - Lượt 6: Bật cờ xin số Mốc 2 (`milestone: 2`), nhắc nhẹ nhàng gửi quy hoạch & bảng giá mới nhất.
+  - Lượt $\ge 7$: Giữ tế nhị, chỉ nhắc lại theo chu kỳ (lượt 11, 16...) hoặc khi khách hỏi sâu pháp lý / xem đất.

@@ -360,11 +360,45 @@ export function splitMessageIntoBubbles(text: string): string[] {
 
 export const MAX_BUBBLES_PER_TURN = 3;
 
+/**
+ * Làm sạch câu trả lời của AI ở bong bóng thứ 2 (lượt 1):
+ * - Xóa bỏ lời chào ở đầu câu (vì bong bóng 1 đã chào chuẩn mực).
+ * - Xóa bỏ lời xin số / Zalo ở cuối câu (vì bong bóng 3 đã có câu xin số chuẩn mực kèm tài liệu).
+ * - Xóa bỏ các câu hỏi mở không cần thiết (mua đầu tư hay làm nhà vườn).
+ */
+export function cleanAnswerBubble(text: string): string {
+  if (!text) return "";
+  let cleaned = text.trim();
+
+  // 1. Xóa lời chào mở đầu nếu AI lỡ viết thêm
+  cleaned = cleaned
+    .replace(/^(dạ\s+)?(em\s+)?chào\s+(anh\/chị|anh\s+chị|anh|chị)[^.!?\n]*[.!?\n]*/i, "")
+    .trim();
+
+  // 2. Xóa lời xin số / Zalo ở cuối nếu AI viết kèm (hỗ trợ cả sau dấu chấm hoặc xuống dòng)
+  cleaned = cleaned
+    .replace(/(?:\n+|[.!?]\s*)[^\n.!?]*(xin|gửi|cho\s+em|kết\s+nối|kết\s+bạn|để\s+lại)[^\n.!?]*(số|sđt|zalo|điện\s+thoại)[^.!?\n]*[.!?]?$/i, ".")
+    .trim();
+
+  // 3. Xóa các câu hỏi mở như hỏi mua đầu tư hay làm nhà vườn
+  cleaned = cleaned
+    .replace(/(?:\n+|[.!?]\s*)[^\n.!?]*(anh\/chị|anh|chị)\s+(muốn\s+)?(mua\s+)?(để\s+)?(đầu\s+tư|làm\s+nhà\s+vườn|nghỉ\s+dưỡng|để\s+ở)[^.!?\n]*[.!?]?$/i, ".")
+    .trim();
+
+  cleaned = cleaned.replace(/\.+$/, ".");
+
+  if (cleaned.length > 0) {
+    cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+  }
+
+  return cleaned || text.trim();
+}
+
 async function sendMessageSequence(
   recipient: Recipient,
   items: OutgoingMessage[],
   keepOriginalRecipient: boolean,
-  resolveIntentTextFn: (intent: ReplyIntent) => Promise<string>
+  resolveIntentTextFn: (intent: ReplyIntent) => Promise<string | string[]>
 ): Promise<string | undefined> {
   let resolvedPsid: string | undefined;
   let currentRecipient = recipient;
@@ -374,8 +408,8 @@ async function sendMessageSequence(
     if (totalSentBubbles >= MAX_BUBBLES_PER_TURN) break;
 
     const item = items[i];
-    const text = await resolveIntentTextFn(item);
-    const bubbles = splitMessageIntoBubbles(text);
+    const resolved = await resolveIntentTextFn(item);
+    const bubbles = Array.isArray(resolved) ? resolved : splitMessageIntoBubbles(resolved);
 
     for (let b = 0; b < bubbles.length; b++) {
       if (totalSentBubbles >= MAX_BUBBLES_PER_TURN) break;
@@ -507,8 +541,12 @@ export async function runFlowTurn(
         // Khống chế cứng: Mỗi lượt chat CHỈ gửi đúng 1 intent của AI (không tách lời chào thành intent riêng)
         const itemsToSend: OutgoingMessage[] = result.messagesToSend.slice(0, 1);
 
+        const isFirstQuestion =
+          customerMessageCount === 1 &&
+          (result.messagesToSend[0].kind === 'AI_FREE_TEXT' || result.messagesToSend[0].kind === 'AI_TOPIC');
+
         let updatedAiHistory: AiHistoryEntry[] | undefined;
-        const intentResolver = async (intent: ReplyIntent) => {
+        const intentResolver = async (intent: ReplyIntent): Promise<string | string[]> => {
           const { text, updatedHistory } = await resolveIntentText(
             intent,
             userText,
@@ -520,6 +558,23 @@ export async function runFlowTurn(
             phoneCadence.milestone
           );
           if (updatedHistory) updatedAiHistory = updatedHistory;
+
+          // Lượt hỏi đầu tiên của khách: Cố định cấu trúc đúng 3 bong bóng
+          // Bong bóng 1: Chào hỏi lịch sự theo đúng danh xưng (Dạ em chào anh/chị ạ)
+          // Bong bóng 2: Trả lời ngắn gọn, đúng trọng tâm câu hỏi của khách (giá, diện tích, sổ đỏ, vị trí)
+          // Bong bóng 3: BẮT BUỘC câu xin số Zalo kèm lợi ích gửi tài liệu (sơ đồ phân lô, bảng giá)
+          if (isFirstQuestion) {
+            const bubble1 = formatPersonalizedMessage('Dạ em chào anh/chị ạ!', customerName, userText, gender);
+            const bubble2 = cleanAnswerBubble(text);
+            const bubble3 = formatPersonalizedMessage(
+              'Em có sẵn sơ đồ phân lô và bảng giá chi tiết từng vị trí, anh/chị cho em xin số Zalo để em gửi qua cho mình tiện xem nhé!',
+              customerName,
+              userText,
+              gender
+            );
+            return [bubble1, bubble2, bubble3].filter(Boolean);
+          }
+
           return text;
         };
 
