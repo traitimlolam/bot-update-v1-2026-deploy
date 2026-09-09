@@ -415,5 +415,23 @@ describe('genderDetector', () => {
       expect(r2.gender).toBe('FEMALE');
       expect(r2.callName).toBe('Trang');
     });
+
+    it('nhận diện chính xác tên đảo Facebook Tên + Họ + Đệm (Ngọc Nguyễn Văn, Dũng Trần Văn, Hương Lê Thị)', () => {
+      const r1 = analyzeVietnameseName('Ngọc Nguyễn Văn');
+      expect(r1.gender).toBe('MALE');
+      expect(r1.callName).toBe('Ngọc');
+
+      const r2 = analyzeVietnameseName('Ngoc Nguyen Van');
+      expect(r2.gender).toBe('MALE');
+      expect(r2.callName).toBe('Ngoc');
+
+      const r3 = analyzeVietnameseName('Dũng Trần Văn');
+      expect(r3.gender).toBe('MALE');
+      expect(r3.callName).toBe('Dũng');
+
+      const r4 = analyzeVietnameseName('Hương Lê Thị');
+      expect(r4.gender).toBe('FEMALE');
+      expect(r4.callName).toBe('Hương');
+    });
   });
 });

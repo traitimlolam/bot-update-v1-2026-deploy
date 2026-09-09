@@ -244,13 +244,29 @@ export function analyzeVietnameseName(
   // Mặc định tên gọi (callName) là từ cuối cùng trong chuỗi họ tên
   let callName = rawTokens[rawTokens.length - 1];
 
-  // Phát hiện tên bị đảo ngược (First name đứng trước Họ, ví dụ: "Bay Nguyen", "Lan Nguyen", "Trang Thanh Bui")
+  // Phát hiện tên bị đảo ngược (First name đứng trước Họ, ví dụ: "Bay Nguyen", "Lan Nguyen", hoặc Facebook đảo Tên + Họ + Đệm "Ngọc Nguyễn Văn")
   let isReversedOrder = false;
   if (
     rawTokens.length === 2 &&
     COMMON_SURNAMES.has(normTokens[1]) &&
     !COMMON_SURNAMES.has(normTokens[0])
   ) {
+    isReversedOrder = true;
+    callName = rawTokens[0];
+  } else if (
+    rawTokens.length >= 3 &&
+    COMMON_SURNAMES.has(normTokens[normTokens.length - 1]) &&
+    !COMMON_SURNAMES.has(normTokens[0])
+  ) {
+    isReversedOrder = true;
+    callName = rawTokens[0];
+  } else if (
+    rawTokens.length >= 3 &&
+    !COMMON_SURNAMES.has(normTokens[0]) &&
+    COMMON_SURNAMES.has(normTokens[1]) &&
+    (MALE_MIDDLE_NAMES.has(normTokens[normTokens.length - 1]) || FEMALE_MIDDLE_NAMES.has(normTokens[normTokens.length - 1]))
+  ) {
+    // Dạng Facebook đảo Tên + Họ + Đệm (ví dụ: "Ngọc Nguyễn Văn", "Dũng Trần Văn", "Hương Lê Thị")
     isReversedOrder = true;
     callName = rawTokens[0];
   } else if (
@@ -268,33 +284,30 @@ export function analyzeVietnameseName(
     return { gender: textGender, callName };
   }
 
-  // 1. Kiểm tra tên đệm "Thị" (chắc chắn 100% Nữ)
-  for (let i = 1; i < normTokens.length - 1; i++) {
-    if (FEMALE_MIDDLE_NAMES.has(normTokens[i])) {
-      return { gender: 'FEMALE', callName };
-    }
-  }
+  // 1. Quét tên đệm nữ và nam trên toàn bộ các từ (không tính từ được chọn làm callName)
+  const nonGivenTokens = normTokens.filter((_, idx) => (!isReversedOrder ? idx !== normTokens.length - 1 : idx !== 0));
+  const hasFemaleMiddle = nonGivenTokens.some((t) => FEMALE_MIDDLE_NAMES.has(t));
+  const hasMaleMiddle = nonGivenTokens.some((t) => MALE_MIDDLE_NAMES.has(t));
 
-  // 1b. Kiểm tra tên đệm nam truyền thống (Văn, Hữu, Đình, Đức, Công,...)
-  for (let i = 1; i < normTokens.length - 1; i++) {
-    if (MALE_MIDDLE_NAMES.has(normTokens[i])) {
-      return { gender: 'MALE', callName };
-    }
+  if (hasFemaleMiddle && !hasMaleMiddle) {
+    return { gender: 'FEMALE', callName };
+  }
+  if (hasMaleMiddle && !hasFemaleMiddle) {
+    return { gender: 'MALE', callName };
   }
 
   const givenNameNorm = removeVietnameseTones(callName).toLowerCase();
 
-  // 1c. Kiểm tra tổ hợp Đệm + Tên trung tính (vd: Tuấn Anh -> Nam, Ngọc Anh -> Nữ, Thu Hà -> Nữ, Quang Minh -> Nam)
-  // Chỉ áp dụng khi có tên đệm (không phải tên đảo ngược 2 từ kiểu First name + Surname)
-  if (!isReversedOrder && normTokens.length >= 2) {
-    const prevToken = normTokens[normTokens.length - 2];
-    const compoundName = `${prevToken} ${givenNameNorm}`;
-
-    if (FEMALE_COMPOUND_NAMES.has(compoundName)) {
-      return { gender: 'FEMALE', callName };
-    }
-    if (MALE_COMPOUND_NAMES.has(compoundName)) {
-      return { gender: 'MALE', callName };
+  // 1c. Kiểm tra tổ hợp Đệm + Tên trung tính (vd: Tuấn Anh -> Nam, Ngọc Anh -> Nữ, Văn Ngọc -> Nam, Thu Hà -> Nữ)
+  if (normTokens.length >= 2) {
+    for (const token of nonGivenTokens) {
+      const compoundForward = `${token} ${givenNameNorm}`;
+      if (FEMALE_COMPOUND_NAMES.has(compoundForward)) {
+        return { gender: 'FEMALE', callName };
+      }
+      if (MALE_COMPOUND_NAMES.has(compoundForward)) {
+        return { gender: 'MALE', callName };
+      }
     }
   }
 
