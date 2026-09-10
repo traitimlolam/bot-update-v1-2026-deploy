@@ -1,5 +1,5 @@
 {
-  "aiFallbackText": "Hiện tại bên em đang có nhiều lô đất giá rẻ từ 1,5tr/m2 (phổ biến 2-3tr/m2, diện tích phổ biến 100-120m2/lô) tại các xã Xuất Hóa, Quý Hòa, Tân Lập, Yên Nghiệp, Vũ Bình, Nhân Nghĩa - Huyện Lạc Sơn, Tỉnh Hòa Bình (cũ), nay thuộc Tỉnh Phú Thọ. Anh/chị nhắn em số zalo nhé, em gửi vị trí, ảnh mặt bằng và bảng giá chi tiết anh/chị tham khảo ạ.",
+  "aiFallbackText": "Hiện tại bên em đang có nhiều lô đất giá rẻ từ 1,5tr/m2 (phổ biến 2-3tr/m2, diện tích phổ biến 100-120m2/lô) tại các xã Xuất Hóa, Quý Hòa, Tân Lập, Yên Nghiệp, Vũ Bình, Nhân Nghĩa - Huyện Lạc Sơn, Tỉnh Hòa Bình (cũ), nay thuộc Tỉnh Phú Thọ.\n\nAnh/chị nhắn em số zalo nhé, em gửi vị trí, ảnh mặt bằng và bảng giá chi tiết anh/chị tham khảo ạ.",
   "buttons": [
     { "label": "Ở đâu?", "payload": "BTN_LOCATION" },
     { "label": "Có sổ đỏ không?", "payload": "BTN_LEGAL" },

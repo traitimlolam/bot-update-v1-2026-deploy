@@ -35,7 +35,7 @@ import {
   LeadSource,
   updateLeadPhoneAndCopyToFollowUpSheet,
 } from '../services/sheetsService';
-import { generateAiReply } from '../ai/geminiService';
+import { generateAiReply, getSafeFallbackText } from '../ai/geminiService';
 import { withRetry } from '../util/retry';
 
 const GRAPH_API_VERSION = 'v19.0';
@@ -192,7 +192,16 @@ export function verifySignature(
 // Facebook Send API — lớp mỏng gọi Graph API (retry theo mục 10).
 // ---------------------------------------------------------------------------
 
+export function isAutoReplyDisabled(): boolean {
+  const envVal = (process.env.AUTO_REPLY_ENABLED || process.env.ENABLE_AUTO_REPLY || '').trim().toLowerCase();
+  return envVal === 'false' || envVal === '0' || envVal === 'off' || envVal === 'no';
+}
+
 async function callSendApi(body: Record<string, unknown>): Promise<{ recipient_id?: string }> {
+  if (isAutoReplyDisabled()) {
+    console.log('[autoReply] Tính năng trả lời tự động trên Fanpage đang TẮT (AUTO_REPLY_ENABLED=false) — Bỏ qua gọi Facebook Send API');
+    return {};
+  }
   const pageAccessToken = process.env.FB_PAGE_ACCESS_TOKEN;
   return withRetry(async () => {
     const response = await fetch(`${GRAPH_BASE_URL}/me/messages?access_token=${pageAccessToken}`, {
@@ -212,6 +221,7 @@ async function callSendApi(body: Record<string, unknown>): Promise<{ recipient_i
 export type Recipient = { id: string } | { comment_id: string };
 
 export async function sendTypingOn(recipient: Recipient): Promise<void> {
+  if (isAutoReplyDisabled()) return;
   try {
     await callSendApi({ recipient, sender_action: 'typing_on' });
   } catch (err) {
@@ -295,7 +305,7 @@ async function resolveIntentText(
     };
   } catch (err) {
     await logError('generateAiReply', err, { intentKind: intent.kind });
-    const fallbackText = formatPersonalizedMessage(loadMessages().aiFallbackText, customerName, userText, knownGender);
+    const fallbackText = getSafeFallbackText(customerName, knownGender, userText, intent);
     return {
       text: fallbackText,
       updatedHistory: shouldPersistHistory
@@ -340,6 +350,11 @@ export function splitMessageIntoBubbles(text: string): string[] {
   } else if (clean.includes('\n')) {
     parts = clean
       .split(/\n+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  } else if (clean.length > 120 && /(?<=[.!?])\s+/.test(clean)) {
+    parts = clean
+      .split(/(?<=[.!?])\s+/)
       .map((s) => s.trim())
       .filter(Boolean);
   } else {
@@ -841,6 +856,12 @@ async function handleMessagingEvent(event: MessagingEvent): Promise<void> {
 
   console.log(`[handleMessagingEvent] Nhận tin nhắn từ PSID ${psid}: "${text ?? ''}"`);
 
+  // Kiểm tra công tắc tắt trả lời tự động trên Fanpage
+  if (isAutoReplyDisabled()) {
+    console.log(`[autoReply] Tính năng trả lời tự động trên Fanpage đang TẮT (AUTO_REPLY_ENABLED=false). Bỏ qua phản hồi tin nhắn từ PSID ${psid}`);
+    return;
+  }
+
   // Kiểm tra Human Takeover (nhường người thật chat trong vòng 10 phút)
   const conversation = await getConversation(psid);
   if (isHumanTakeoverActive(conversation?.lastHumanReplyAt)) {
@@ -1212,6 +1233,12 @@ async function handleFeedChange(value: FeedCommentValue, pageId?: string): Promi
   // Bỏ qua comment của chính Fanpage/Admin (mục 5.3): tránh bot tự phản hồi chính mình
   // hoặc chốt nhầm hotline của Page thành lead khách.
   if (pageId && value.from.id === pageId) {
+    return;
+  }
+
+  // Kiểm tra công tắc tắt trả lời tự động trên Fanpage
+  if (isAutoReplyDisabled()) {
+    console.log(`[autoReply] Tính năng trả lời tự động trên Fanpage đang TẮT (AUTO_REPLY_ENABLED=false). Bỏ qua phản hồi comment ${value.comment_id}`);
     return;
   }
 

@@ -234,16 +234,39 @@ export interface GenerateAiReplyParams {
  * Gọi bộ não 9Router máy chủ qua OpenAI-compatible API (mục 4.2) — bọc `withRetry` (mục 10) như
  * mọi lời gọi ra ngoài khác.
  */
-function getSafeFallbackText(customerName: string | null, knownGender?: Gender | null, userText?: string): string {
-  const fallback = loadMessages().aiFallbackText;
+export function getSafeFallbackText(
+  customerName: string | null,
+  knownGender?: Gender | null,
+  userText?: string,
+  intent?: ReplyIntent
+): string {
+  const { gender: analyzedGender, callName } = analyzeVietnameseName(customerName, userText ?? '');
   const effectiveGender =
-    knownGender && knownGender !== 'UNKNOWN' ? knownGender : analyzeVietnameseName(customerName, userText ?? '').gender;
-  if (effectiveGender === 'MALE') {
-    return fallback.replace(/anh\/chị/g, 'anh').replace(/Anh\/chị/g, 'Anh');
-  } else if (effectiveGender === 'FEMALE') {
-    return fallback.replace(/anh\/chị/g, 'chị').replace(/Anh\/chị/g, 'Chị');
+    knownGender && knownGender !== 'UNKNOWN' ? knownGender : analyzedGender;
+  const pronoun = effectiveGender === 'MALE' ? 'anh' : effectiveGender === 'FEMALE' ? 'chị' : 'anh/chị';
+  const nameSuffix = callName ? ` ${callName}` : '';
+
+  if (intent) {
+    switch (intent.kind) {
+      case 'AI_PHONE_CONFIRMED':
+        return `Dạ em cảm ơn ${pronoun}${nameSuffix} đã để lại số điện thoại ạ!\n\nEm đã chuyển thông tin sang bạn chuyên viên tư vấn khu vực Lạc Sơn, bạn sẽ chủ động liên hệ hỗ trợ ${pronoun} ngay nhé ạ.`;
+      case 'AI_FOLLOWUP_CLOSED':
+        return `Dạ em đã ghi nhận thông tin dặn dò của ${pronoun} rồi ạ.\n\nChuyên viên phụ trách bên em sẽ liên hệ theo đúng khung giờ thuận tiện nhất của ${pronoun} nhé ạ!`;
+      case 'AI_PHONE_INVALID':
+        return `Dạ hình như số điện thoại chưa được chính xác ạ, ${pronoun} kiểm tra và nhắn lại giúp em với nhé!`;
+      case 'AI_GREETING':
+        return `Dạ em chào ${pronoun}${nameSuffix} ạ! Em có thể hỗ trợ thông tin gì cho mình về các lô đất bên em ạ?`;
+    }
   }
-  return fallback;
+
+  const fallback = loadMessages().aiFallbackText;
+  let text = fallback;
+  if (effectiveGender === 'MALE') {
+    text = text.replace(/anh\/chị/g, 'anh').replace(/Anh\/chị/g, 'Anh');
+  } else if (effectiveGender === 'FEMALE') {
+    text = text.replace(/anh\/chị/g, 'chị').replace(/Anh\/chị/g, 'Chị');
+  }
+  return text;
 }
 
 export async function generateAiReply(params: GenerateAiReplyParams): Promise<string> {
@@ -320,7 +343,7 @@ export async function generateAiReply(params: GenerateAiReplyParams): Promise<st
         max_tokens: 250,
         stream: false,
       }),
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(20000),
     });
 
     if (!response.ok) {
@@ -357,9 +380,9 @@ export async function generateAiReply(params: GenerateAiReplyParams): Promise<st
     }
 
     return text;
-    });
+    }, 2);
   } catch (error) {
     console.error('[generateAiReply] Lỗi khi gọi AI Router, sử dụng câu trả lời dự phòng an toàn:', error);
-    return getSafeFallbackText(customerName, knownGender, userText);
+    return getSafeFallbackText(customerName, knownGender, userText, intent);
   }
 }
