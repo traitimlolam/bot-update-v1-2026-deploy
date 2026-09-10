@@ -1,8 +1,8 @@
 import { getDb } from "../state/firestore";
 
-const ROUTER_API_KEY = process.env.AI_ROUTER_API_KEY || process.env.ROUTER_API_KEY || "sk-or-v1-fallback";
-const ROUTER_BASE_URL = process.env.AI_ROUTER_BASE_URL || "https://openrouter.ai/api/v1";
-const MODEL_NAME = process.env.AI_ROUTER_MODEL || "google/gemini-2.5-flash";
+const ROUTER_BASE_URL = process.env.AI_ROUTER_URL || process.env.AI_ROUTER_BASE_URL || 'http://34.124.234.83:20129/v1';
+const ROUTER_API_KEY = process.env.AI_ROUTER_API_KEY || '123456';
+const MODEL_NAME = process.env.AI_MODEL_NAME || process.env.AI_ROUTER_MODEL || 'ag/gemini-3.8-flash-high';
 const GRAPH_BASE_URL = "https://graph.facebook.com/v21.0";
 const AI_TIMEOUT_MS = 25000;
 
@@ -91,35 +91,36 @@ const AREA_KNOWLEDGE_BASE = `
  */
 export type HoaBinhImageCategory = "SCENERY" | "INFRASTRUCTURE" | "CULTURE";
 
+export const DEFAULT_SAFE_IMAGE =
+  "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/1f/Thac_bac_Long_Cung.jpg/1280px-Thac_bac_Long_Cung.jpg";
+
 export const HOA_BINH_IMAGE_GROUPS: Record<HoaBinhImageCategory, string[]> = {
   SCENERY: [
-    "https://bvhttdl.mediacdn.vn/291773308735864832/2021/6/17/img2149-16239162985791986518115.jpg",
-    "https://statics.vinpearl.com/thung-nai-hoa-binh-2_1629344400.jpg",
-    "https://baovanhoa.vn/Portals/0/Images/vannguyen/2024/02/16/thung-lung-mai-chau-7.jpg",
-    "https://mia.vn/media/uploads/blog-du-lich/deo-thung-khe-1-1638202932.jpg",
-    "https://toquoc.mediacdn.vn/280518851207788544/2020/10/22/thung-lung-mai-chau-hoa-binh-16033486337581177651083.jpg",
-    "https://vietnamnomad.com/wp-content/uploads/2021/04/Deo-Da-Trang-Hoa-Binh-Vietnamnomad-01.jpg",
-    "https://file1.dangcongsan.vn/data/0/images/2023/11/14/upload_174/thung-nai.jpg",
+    "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/1f/Thac_bac_Long_Cung.jpg/1280px-Thac_bac_Long_Cung.jpg",
+    "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/ec/S%C3%B4ng_B%C3%B4i.JPG/1280px-S%C3%B4ng_B%C3%B4i.JPG",
+    "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/2e/Pu_Luong_01.JPG/1280px-Pu_Luong_01.JPG",
+    "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/78/Mai_Chau_2008.jpg/1280px-Mai_Chau_2008.jpg",
+    "https://thumb.wikimedia.org/wikipedia/commons/thumb/d/d5/H%C3%B2a_B%C3%ACnh.JPG/1280px-H%C3%B2a_B%C3%ACnh.JPG",
+    "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ad/%C4%90%E1%BB%99ng_Th%C3%A1c_B%E1%BB%9D%2C_Cao_Phong%2C_H%C3%B2a_B%C3%ACnh.jpg/1280px-%C4%90%E1%BB%99ng_Th%C3%A1c_B%E1%BB%9D%2C_Cao_Phong%2C_H%C3%B2a_B%C3%ACnh.jpg",
   ],
 
   INFRASTRUCTURE: [
-    "https://vnanet.vn/Data/Articles/2023/10/01/7027170/cong-trinh-thuy-dien-hoa-binh-bieu-tuong-cua-tinh-huu-nghi-viet-nga-7027170.jpg",
-    "https://moit.gov.vn/upload/2005504/20230608/6cbe22b5-31ba-449e-ba6a-3932824cfcbb.jpg",
-    "https://baoxaydung.com.vn/stores/news_dataimages/2023/082023/24/11/cau-hoa-binh-3.jpg",
-    "https://cdnmedia.baotintuc.vn/Upload/4p05qdkXToL5iG2kkg/files/2023/09/cau-hoa-binh.jpg",
-    "https://bcp.cdnchinhphu.vn/334894974524682240/2023/5/11/cao-toc-16837947702811440842790.jpg",
-    "https://img.tapchicongthuong.vn/tcct-media/23/9/28/khoi-cong-cao-toc-hoa-binh-moc-chau.jpg",
+    "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/70/H%C3%B2a_B%C3%ACnh_Dam.JPG/1280px-H%C3%B2a_B%C3%ACnh_Dam.JPG",
+    "https://thumb.wikimedia.org/wikipedia/commons/thumb/9/9a/20220522_Th%E1%BB%A7y_%C4%90i%E1%BB%87n_H%C3%B2a_B%C3%ACnh.jpg/1280px-20220522_Th%E1%BB%A7y_%C4%90i%E1%BB%87n_H%C3%B2a_B%C3%ACnh.jpg",
+    "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/88/Nh%C3%A0_m%C3%A1y_Th%E1%BB%A7y_%C4%91i%E1%BB%87n_H%C3%B2a_B%C3%ACnh.jpg/1280px-Nh%C3%A0_m%C3%A1y_Th%E1%BB%A7y_%C4%91i%E1%BB%87n_H%C3%B2a_B%C3%ACnh.jpg",
+    "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/b8/C%E1%BB%ADa_x%E1%BA%A3_n%C6%B0%E1%BB%9Bc.jpg/1280px-C%E1%BB%ADa_x%E1%BA%A3_n%C6%B0%E1%BB%9Bc.jpg",
+    "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/38/Tr%C3%AAn_%C4%91%E1%BA%ADp_th%E1%BB%A7y_%C4%91i%E1%BB%87n_H%C3%B2a_B%C3%ACnh_nh%C3%ACn_to%C3%A0n_c%E1%BA%A3nh_%283%29.jpg/1280px-Tr%C3%AAn_%C4%91%E1%BA%ADp_th%E1%BB%A7y_%C4%91i%E1%BB%87n_H%C3%B2a_B%C3%ACnh_nh%C3%ACn_to%C3%A0n_c%E1%BA%A3nh_%283%29.jpg",
+    "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/7c/H%E1%BA%A7m_%C4%91%C6%B0%E1%BB%9Dng_b%E1%BB%99_nh%C3%A0_m%C3%A1y_th%E1%BB%A7y_%C4%91i%E1%BB%87n_H%C3%B2a_B%C3%ACnh.jpg/1280px-H%E1%BA%A7m_%C4%91%C6%B0%E1%BB%9Dng_b%E1%BB%99_nh%C3%A0_m%C3%A1y_th%E1%BB%A7y_%C4%91i%E1%BB%87n_H%C3%B2a_B%C3%ACnh.jpg",
+    "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/50/H%E1%BB%93_th%E1%BB%A7y_%C4%91i%E1%BB%87n_H%C3%B2a_B%C3%ACnh.jpg/1280px-H%E1%BB%93_th%E1%BB%A7y_%C4%91i%E1%BB%87n_H%C3%B2a_B%C3%ACnh.jpg",
   ],
 
   CULTURE: [
-    "https://cly.1cdn.vn/2023/01/29/cdn-congly-vn_le-hoi-khai-ha-dac-sac-rieng-cua-dan-toc-muong-o-hoa-binh-hinh-anh01657009134.jpg",
-    "https://images.baodantoc.vn/uploads/lethihongphuc/2023/1/28/c9d4d56b-1539-4da5-a-16746374630901356692072.jpg",
-    "https://imgchinhsachcuocsong.vnanet.vn/MediaUpload/Org/2024/02/17/145332-thumbstand-1.jpg",
-    "https://hoinhap.vanhoavaphattrien.vn/uploads/2025/04/09/1-chieng-muong-1744174934.jpg",
-    "https://nhn.1cdn.vn/2023/08/05/img_8081.jpg",
-    "https://maichautourist.com/assets/uploads/blog/nha-san-so-6-ban-lac-mai-chau-hoa-binh-1.JPG",
-    "https://galatravel.vn/pic/destination/images/com-lam-mai-chau.jpg",
-    "https://viptrip.vn/public/upload/news/com-lam-mai-chau_19-10-2022_425592055.jpg",
+    "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c0/A_Thai_stilt_house_%284115406064%29.jpg/1280px-A_Thai_stilt_house_%284115406064%29.jpg",
+    "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/b6/Anasoj_en_rizkampo_%28Distrikto_Mai_Chau%2C_Vjetnamio%29_01.jpg/1280px-Anasoj_en_rizkampo_%28Distrikto_Mai_Chau%2C_Vjetnamio%29_01.jpg",
+    "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/29/A_woman_stuffing_a_matress_%28like_those_we_slept_on_--_comfy%21%29_%284114637327%29.jpg/1280px-A_woman_stuffing_a_matress_%28like_those_we_slept_on_--_comfy%21%29_%284114637327%29.jpg",
+    "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c0/Costume%2C_Muong%2C_Hoa_Binh%2C_1980%2C_view_1%2C_cotton%2C_belt_with_extra_silk_thread_-_Vietnamese_Women%27s_Museum_-_Hanoi%2C_Vietnam_-_DSC03870.JPG/1280px-Costume%2C_Muong%2C_Hoa_Binh%2C_1980%2C_view_1%2C_cotton%2C_belt_with_extra_silk_thread_-_Vietnamese_Women%27s_Museum_-_Hanoi%2C_Vietnam_-_DSC03870.JPG",
+    "https://thumb.wikimedia.org/wikipedia/commons/thumb/d/d6/Comb%2C_Muong%2C_Hoa_Binh%2C_1975%2C_ivory_-_Vietnamese_Women%27s_Museum_-_Hanoi%2C_Vietnam_-_DSC03977.JPG/1280px-Comb%2C_Muong%2C_Hoa_Binh%2C_1975%2C_ivory_-_Vietnamese_Women%27s_Museum_-_Hanoi%2C_Vietnam_-_DSC03977.JPG",
+    "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/8f/Province_de_Hoa-Binh_%281909%29.jpg/1280px-Province_de_Hoa-Binh_%281909%29.jpg",
   ],
 };
 
@@ -599,20 +600,65 @@ export async function searchContextImageUrl(
 }
 
 /**
- * 3. Đăng bài viết kèm ảnh lên Fanpage qua Meta Graph API chính thức
+ * Kiểm tra nhanh tính khả dụng của URL ảnh trước khi đăng (Pre-flight check)
+ * Thực hiện lệnh HEAD hoặc GET byte đầu để xác minh URL không bị 404, 403, timeout.
  */
-export async function publishPostToPage(caption: string, imageUrl: string): Promise<PublishResult> {
-  const pageAccessToken = process.env.FB_PAGE_ACCESS_TOKEN;
-  if (!pageAccessToken) {
-    return { success: false, error: "FB_PAGE_ACCESS_TOKEN not configured" };
+export async function verifyImageUrl(url: string, timeoutMs: number = 5000): Promise<boolean> {
+  if (!url || typeof url !== "string" || !url.startsWith("http")) {
+    return false;
   }
-
   try {
-    const pageId = process.env.FB_PAGE_ID || "me";
-    const url = `${GRAPH_BASE_URL}/${pageId}/photos`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    const res = await fetch(url, {
+      method: "HEAD",
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      },
+    });
+    clearTimeout(timeoutId);
+
+    if (res.ok) {
+      return true;
+    }
+
+    // Nếu HEAD bị 405 Method Not Allowed hoặc 403, thử GET byte đầu tiên
+    if (res.status === 405 || res.status === 403) {
+      const getController = new AbortController();
+      const getTimeoutId = setTimeout(() => getController.abort(), timeoutMs);
+      const getRes = await fetch(url, {
+        method: "GET",
+        headers: {
+          Range: "bytes=0-10",
+          "User-Agent": "Mozilla/5.0",
+        },
+        signal: getController.signal,
+      });
+      clearTimeout(getTimeoutId);
+      return getRes.ok || getRes.status === 206;
+    }
+
+    return false;
+  } catch (err) {
+    console.warn(`[autoPost] Pre-flight image check failed for URL: ${url}`, err);
+    return false;
+  }
+}
+
+/**
+ * Đăng bài dạng văn bản thông thường lên Fanpage qua POST /{pageId}/feed
+ */
+export async function publishTextFeedPost(
+  pageId: string,
+  pageAccessToken: string,
+  message: string
+): Promise<PublishResult> {
+  try {
+    const url = `${GRAPH_BASE_URL}/${pageId}/feed`;
     const params = new URLSearchParams({
-      url: imageUrl,
-      caption: caption,
+      message: message,
       published: "true",
       access_token: pageAccessToken,
     });
@@ -625,23 +671,104 @@ export async function publishPostToPage(caption: string, imageUrl: string): Prom
       body: params.toString(),
     });
 
-    const data = (await res.json()) as { id?: string; post_id?: string; error?: { message?: string } };
+    const data = (await res.json()) as { id?: string; error?: { message?: string } };
     if (!res.ok || data.error) {
       const errMsg = data.error?.message || "Facebook API error";
-      if (errMsg.includes("pages_manage_posts")) {
-        console.warn("[autoPost] LƯU Ý KỸ THUẬT: Token hiện tại thiếu quyền pages_manage_posts. Cần bổ sung quyền này tại Meta Developers Console để đăng trực tiếp lên Fanpage.");
-      }
-      console.error("[autoPost] Facebook publish photo error:", data.error);
+      console.error("[autoPost] Facebook publish text post error:", data.error);
       return { success: false, error: errMsg };
     }
 
-    const publishedId = data.post_id || data.id;
-    console.log("[autoPost] Successfully published post to Facebook:", publishedId);
+    const publishedId = data.id;
+    console.log("[autoPost] Successfully published text post to Facebook feed:", publishedId);
     return { success: true, id: publishedId };
   } catch (err) {
-    console.error("[autoPost] Failed to publish post:", err);
+    console.error("[autoPost] Failed to publish text post to feed:", err);
     return { success: false, error: (err as Error).message };
   }
+}
+
+/**
+ * 3. Đăng bài viết lên Fanpage qua Meta Graph API chính thức
+ * Có cơ chế tự động kiểm tra ảnh trước khi đăng (Pre-flight Image Check & Fallback):
+ * - Bước 1: Kiểm tra nhanh URL ảnh dự kiến (HEAD/GET).
+ * - Nếu ảnh lỗi (404, 403, timeout): lập tức chuyển sang DEFAULT_SAFE_IMAGE.
+ * - Nếu cả ảnh dự phòng cũng lỗi: chuyển sang đăng văn bản thông thường (POST /{pageId}/feed).
+ * - Nếu Facebook ném lỗi mã 324 (Missing or invalid image file): tự động fallback sang POST /{pageId}/feed.
+ */
+export async function publishPostToPage(caption: string, imageUrl?: string): Promise<PublishResult> {
+  const pageAccessToken = process.env.FB_PAGE_ACCESS_TOKEN;
+  if (!pageAccessToken) {
+    return { success: false, error: "FB_PAGE_ACCESS_TOKEN not configured" };
+  }
+
+  const pageId = process.env.FB_PAGE_ID || "me";
+  let targetImageUrl: string | null = null;
+
+  // Pre-flight check ảnh
+  if (imageUrl) {
+    const isMainValid = await verifyImageUrl(imageUrl);
+    if (isMainValid) {
+      targetImageUrl = imageUrl;
+    } else {
+      console.warn(`[autoPost] Ảnh chỉ định không hợp lệ hoặc lỗi mạng: ${imageUrl}. Chuyển sang DEFAULT_SAFE_IMAGE.`);
+      const isSafeValid = await verifyImageUrl(DEFAULT_SAFE_IMAGE);
+      if (isSafeValid) {
+        targetImageUrl = DEFAULT_SAFE_IMAGE;
+      } else {
+        console.warn("[autoPost] Cả DEFAULT_SAFE_IMAGE cũng không phản hồi, fallback sang bài viết văn bản thuần.");
+      }
+    }
+  }
+
+  // Đăng kèm ảnh nếu có ảnh hợp lệ
+  if (targetImageUrl) {
+    try {
+      const url = `${GRAPH_BASE_URL}/${pageId}/photos`;
+      const params = new URLSearchParams({
+        url: targetImageUrl,
+        caption: caption,
+        published: "true",
+        access_token: pageAccessToken,
+      });
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: params.toString(),
+      });
+
+      const data = (await res.json()) as { id?: string; post_id?: string; error?: { message?: string; code?: number } };
+      if (!res.ok || data.error) {
+        const errMsg = data.error?.message || "Facebook API error";
+        console.error("[autoPost] Facebook publish photo error:", data.error);
+
+        // Nếu lỗi 324 (Missing or invalid image file) hoặc lỗi liên quan đến ảnh -> Fallback sang text post
+        if (data.error?.code === 324 || errMsg.toLowerCase().includes("image")) {
+          console.warn("[autoPost] Facebook từ chối ảnh (code 324). Tự động fallback sang đăng bài văn bản thông thường qua /feed...");
+          return await publishTextFeedPost(pageId, pageAccessToken, caption);
+        }
+
+        if (errMsg.includes("pages_manage_posts")) {
+          console.warn("[autoPost] LƯU Ý KỸ THUẬT: Token hiện tại thiếu quyền pages_manage_posts. Cần bổ sung quyền này tại Meta Developers Console để đăng trực tiếp lên Fanpage.");
+        }
+
+        return { success: false, error: errMsg };
+      }
+
+      const publishedId = data.post_id || data.id;
+      console.log("[autoPost] Successfully published photo post to Facebook:", publishedId);
+      return { success: true, id: publishedId };
+    } catch (err) {
+      console.error("[autoPost] Failed to publish photo post:", err);
+      return await publishTextFeedPost(pageId, pageAccessToken, caption);
+    }
+  }
+
+  // Nếu không có bất kỳ ảnh nào hợp lệ -> Đăng văn bản thuần
+  console.log("[autoPost] Đăng bài dạng văn bản thông thường lên Fanpage (POST /{pageId}/feed)...");
+  return await publishTextFeedPost(pageId, pageAccessToken, caption);
 }
 
 /**

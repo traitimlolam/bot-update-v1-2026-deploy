@@ -73,7 +73,7 @@ app.post('/cron/daily-reminder', async (req: Request, res: Response) => {
  */
 app.post('/cron/auto-post', async (req: Request, res: Response) => {
   try {
-    const topic = req.body?.topic as PostTopic | undefined;
+    const topic = (req.body?.topic || req.query?.topic) as PostTopic | undefined;
     const result = await executeAutoPost(topic);
     res.status(200).json(result);
   } catch (err) {

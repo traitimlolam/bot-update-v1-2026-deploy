@@ -8,6 +8,10 @@ import {
   searchContextImageUrl,
   DAILY_TOPICS,
   getRotatingDailyTopic,
+  DEFAULT_SAFE_IMAGE,
+  verifyImageUrl,
+  publishPostToPage,
+  
 } from "../src/services/autoPostService";
 
 describe("autoPostService - Thông tin liên hệ bài đăng Fanpage & Chống lặp Hotline", () => {
@@ -181,5 +185,150 @@ describe("autoPostService - 5 Chủ đề xoay vòng mỗi ngày & Kho ảnh chu
     expect(img3).toContain("sig=");
     const rawUrl3 = img3.split("?")[0].split("&")[0];
     expect(HOA_BINH_IMAGE_GROUPS.CULTURE).toContain(rawUrl3);
+  });
+});
+
+describe("autoPostService - Pre-flight Image Check & Fallbacks (Khắc phục lỗi 324)", () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    delete process.env.FB_PAGE_ACCESS_TOKEN;
+    delete process.env.FB_PAGE_ID;
+  });
+
+  it("DEFAULT_SAFE_IMAGE là URL hợp lệ và có đuôi .jpg/.png", () => {
+    expect(DEFAULT_SAFE_IMAGE).toBeDefined();
+    expect(DEFAULT_SAFE_IMAGE.startsWith("https://") || DEFAULT_SAFE_IMAGE.startsWith("http://")).toBe(true);
+    expect(/\.(jpg|jpeg|png)/i.test(DEFAULT_SAFE_IMAGE)).toBe(true);
+  });
+
+  it("verifyImageUrl trả về true khi HTTP 200 OK", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+    } as any);
+
+    const isValid = await verifyImageUrl("https://example.com/test.jpg");
+    expect(isValid).toBe(true);
+    expect(global.fetch).toHaveBeenCalledWith(
+      "https://example.com/test.jpg",
+      expect.objectContaining({ method: "HEAD" })
+    );
+  });
+
+  it("verifyImageUrl trả về false khi gặp lỗi 404", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+    } as any);
+
+    const isValid = await verifyImageUrl("https://example.com/dead-link.jpg");
+    expect(isValid).toBe(false);
+  });
+
+  it("verifyImageUrl trả về false khi fetch ném ngoại lệ timeout hoặc network error", async () => {
+    global.fetch = jest.fn().mockRejectedValue(new Error("Connection timeout"));
+
+    const isValid = await verifyImageUrl("https://example.com/timeout.jpg");
+    expect(isValid).toBe(false);
+  });
+
+  it("publishPostToPage fallback sang DEFAULT_SAFE_IMAGE khi ảnh chính bị lỗi 404", async () => {
+    process.env.FB_PAGE_ACCESS_TOKEN = "test-token";
+    process.env.FB_PAGE_ID = "123456";
+
+    global.fetch = jest.fn().mockImplementation((url: string, _opts: any) => {
+      // Pre-flight check cho ảnh chính (bị 404)
+      if (url === "https://example.com/bad-image.jpg") {
+        return Promise.resolve({ ok: false, status: 404 });
+      }
+      // Pre-flight check cho DEFAULT_SAFE_IMAGE (200 OK)
+      if (url === DEFAULT_SAFE_IMAGE) {
+        return Promise.resolve({ ok: true, status: 200 });
+      }
+      // Meta Graph API POST /{pageId}/photos
+      if (url.includes("/photos")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ id: "fb_photo_post_999", post_id: "fb_post_999" }),
+        });
+      }
+      return Promise.resolve({ ok: false, status: 500 });
+    });
+
+    const res = await publishPostToPage("Bài viết mẫu Hòa Bình", "https://example.com/bad-image.jpg");
+    expect(res.success).toBe(true);
+    expect(res.id).toBe("fb_post_999");
+
+    // Xác nhận gọi Graph API với DEFAULT_SAFE_IMAGE
+    const photoCall = (global.fetch as jest.Mock).mock.calls.find(c => c[0].includes("/photos"));
+    expect(photoCall).toBeDefined();
+    expect(photoCall[1].body).toContain(encodeURIComponent(DEFAULT_SAFE_IMAGE));
+  });
+
+  it("publishPostToPage fallback sang /feed (văn bản thuần) khi cả ảnh chính và ảnh an toàn đều lỗi", async () => {
+    process.env.FB_PAGE_ACCESS_TOKEN = "test-token";
+    process.env.FB_PAGE_ID = "123456";
+
+    global.fetch = jest.fn().mockImplementation((url: string) => {
+      // Pre-flight check fail hết
+      if (url === "https://example.com/bad1.jpg" || url === DEFAULT_SAFE_IMAGE) {
+        return Promise.resolve({ ok: false, status: 404 });
+      }
+      // Meta Graph API POST /{pageId}/feed
+      if (url.includes("/feed")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ id: "fb_text_post_111" }),
+        });
+      }
+      return Promise.resolve({ ok: false, status: 500 });
+    });
+
+    const res = await publishPostToPage("Bài viết dạng văn bản mẫu", "https://example.com/bad1.jpg");
+    expect(res.success).toBe(true);
+    expect(res.id).toBe("fb_text_post_111");
+
+    const feedCall = (global.fetch as jest.Mock).mock.calls.find(c => c[0].includes("/feed"));
+    expect(feedCall).toBeDefined();
+    expect(new URLSearchParams(feedCall[1].body).get("message")).toBe("Bài viết dạng văn bản mẫu");
+  });
+
+  it("publishPostToPage tự động chuyển sang /feed khi Facebook Graph API trả về lỗi 324 (Missing/invalid image file)", async () => {
+    process.env.FB_PAGE_ACCESS_TOKEN = "test-token";
+    process.env.FB_PAGE_ID = "123456";
+
+    global.fetch = jest.fn().mockImplementation((url: string) => {
+      // Pre-flight cho là ok
+      if (url === "https://example.com/test.jpg") {
+        return Promise.resolve({ ok: true, status: 200 });
+      }
+      // Nhưng Facebook /photos từ chối với lỗi 324
+      if (url.includes("/photos")) {
+        return Promise.resolve({
+          ok: false,
+          json: async () => ({
+            error: {
+              message: "(#324) Missing or invalid image file",
+              code: 324,
+              type: "OAuthException",
+            },
+          }),
+        });
+      }
+      // Fallback sang /feed thành công
+      if (url.includes("/feed")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ id: "fb_feed_fallback_324" }),
+        });
+      }
+      return Promise.resolve({ ok: false, status: 500 });
+    });
+
+    const res = await publishPostToPage("Nội dung bài viết", "https://example.com/test.jpg");
+    expect(res.success).toBe(true);
+    expect(res.id).toBe("fb_feed_fallback_324");
   });
 });
